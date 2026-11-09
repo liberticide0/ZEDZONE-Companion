@@ -13,6 +13,15 @@ foreach (string query in new[] { "돌망치", "stone hammer", "石锤", "３０�
 
 Check(catalog.Find("Area 61", Category.Map).First().Korean == "61구역", "map filter and name ranking");
 Check(catalog.Find("no-such-item", null).Count == 0, "empty result");
+foreach (string query in new[] { "12 게이지", "12 gauge", "12号散弹", "100" })
+{
+    Check(catalog.Find(query, Category.Item).FirstOrDefault()?.ItemId == 100 &&
+        catalog.Find(query, Category.Recipe).FirstOrDefault()?.ItemId == 100,
+        $"12 gauge in both item and recipe filters: {query}");
+}
+Check(catalog.Find("12 게이지", null).Count(e => e.ItemId == 100) == 2,
+    "12 gauge in the default search without imported data");
+
 var batch = catalog.Find("방사능 폭탄", Category.Recipe).Single().Batch!;
 foreach (var (target, batches, output) in new[] { (1, 1, 2), (2, 1, 2), (3, 2, 4), (999, 500, 1000) })
 {

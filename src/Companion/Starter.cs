@@ -1,0 +1,61 @@
+namespace Companion;
+
+internal static class Starter
+{
+    private const string LocalText = "Steam 빌드 26528677 · 게임 현지화 대조";
+    private const string ModDocs = "개발사 MOD 문서 · 제작 방식 참고";
+
+    // Independently written Korean summaries. Chinese search terms are Companion aliases.
+    internal static readonly Entry[] Entries =
+    [
+        new(Category.Item, "나뭇가지", "Wood Stick", "树枝", "나무나 덤불에서 얻는 재료.", LocalText, 20),
+        new(Category.Item, "나무 화살", "Wooden Arrow", "木箭", "목재 화살. 제작 재료와 수량은 이 항목에서 확인할 수 없습니다.", LocalText, 150),
+        new(Category.Item, "돌도끼", "Stone Axe", "石斧", "돌로 만든 도끼.", LocalText, 302),
+        new(Category.Item, "돌망치", "Stone Hammer", "石锤", "돌로 만든 망치. 손으로 만드는 방법은 제작 탭에서 확인할 수 있습니다.", LocalText, 303),
+        new(Category.Item, "사용후 연료봉", "Spent Fuel Rod", "乏燃料棒",
+            "원자력 발전소의 건식 저장 용기에서 획득합니다. 소지 중 피폭되며 방사능 폭탄의 재료로 쓰입니다.", LocalText, 278),
+        new(Category.Item, "방사능 폭탄", "Radiation Bomb", "辐射炸弹",
+            "폭발 지점 주변에 방사능 구름을 남깁니다. 먼 섬에서는 플레이어도 구름에 노출되면 피폭됩니다.", LocalText, 613),
+        new(Category.Item, "보안 출입 장치", "Security Access Device", "安保通行装置",
+            "항구 보안 대장에게서 얻습니다. 61구역 입구에 필요한 인증 장치 세 개 중 하나입니다.", LocalText, 2010),
+        new(Category.Item, "연구원 출입 장치", "Researcher Access Device", "研究员通行装置",
+            "RNA 연구소의 키 카드입니다. 61구역 입구의 인증에 쓰입니다.", LocalText, 2011),
+        new(Category.Item, "기지 출입 장치", "Base Access Device", "基地通行装置",
+            "자동화 공장 수호 기계에게서 얻는 키입니다. 61구역 입구의 인증에 쓰입니다.", LocalText, 2012),
+        new(Category.Item, "공명 코어", "Resonance Core", "共鸣核心",
+            "최종 보스 전투의 보상입니다. 특수 장비 슬롯에 장착하면 적을 밀어내는 음파 능력을 사용할 수 있습니다.",
+            "공식 Steam 1.0.5 공지 · 게임 현지화 대조", 1093),
+        new(Category.Recipe, "돌망치", "Stone Hammer", "石锤",
+            "제작 방식  손 제작\n재료·수량·추가 조건  미검증\n\n개발사 문서의 손 제작 예시입니다. 정확한 요구 조건은 게임 제작 화면에서 확인하세요.", ModDocs, 303),
+        new(Category.Recipe, "방사능 폭탄", "Radiation Bomb", "辐射炸弹",
+            "작업대  간이 작업대, 작업대 또는 고급 작업대\n배치당 생산  2개\n\n" +
+            "연료봉 외에 화약, 용기, 기폭 장치가 필요합니다. 그 수량과 해금 조건은 미검증입니다.",
+            "게임 내 제작 안내 · 공식 Steam 작업대 변경 공지", 613,
+            new RecipeBatch(2, [new Material("사용후 연료봉", 1)])),
+        new(Category.Skill, "그래플", "Grapple", "抓钩",
+            "빠르게 이동하거나 적을 끌어당깁니다. 사용하려면 그래플훅을 장착해야 합니다. 해금 조건은 미검증입니다.", LocalText),
+        new(Category.Skill, "CAS 전투 보조 시스템", "CAS Combat Assist System", "战斗辅助系统",
+            "탄도를 계산해 조준을 보조합니다. CAS 컴퓨터를 장착해야 합니다. 해금 조건은 미검증입니다.", LocalText),
+        new(Category.Skill, "집속 레이저 캐논", "Focused Laser Cannon", "聚焦激光炮",
+            "범위 피해를 주는 능력입니다. 해금 조건과 정확한 재사용 시간은 미검증입니다.", LocalText),
+        new(Category.Skill, "서부의 건슬링거", "Western Gunslinger", "西部枪手",
+            "리볼버 사용 시 자동 조준과 연속 사격을 지원합니다. 해금 조건은 미검증입니다.", LocalText),
+        new(Category.Map, "항구", "Port", "港口",
+            "먼 섬의 철도 전력 구간 중 하나입니다. 항구 보안 대장이 이 지역의 인증 장치를 보유합니다.", LocalText),
+        new(Category.Map, "RNA 연구소", "RNA Lab", "RNA实验室",
+            "먼 섬의 철도 전력 구간 중 하나입니다. 61구역 입구 인증에 쓰이는 키 카드의 출처입니다.", LocalText),
+        new(Category.Map, "자동화 공장", "Automated Factory", "自动化工厂",
+            "먼 섬의 철도 전력 구간 중 하나입니다. 이곳 수호 기계의 키가 61구역 인증에 쓰입니다.", LocalText),
+        new(Category.Map, "원자력 발전소", "Nuclear Plant", "核电站",
+            "노심에 접근할수록 방사선이 강해집니다. 건식 저장 용기에 사용후 연료봉이 있습니다.", LocalText),
+        new(Category.Map, "61구역", "Area 61", "61区",
+            "항구, RNA 연구소, 자동화 공장에서 얻은 인증 장치 세 개를 입구 리더에 넣어 진입합니다.", LocalText),
+        new(Category.Boss, "항구 보안 대장", "Port Security Captain", "港口安保队长",
+            "항구의 수호자입니다. 처치하면 항구역 전력 가동과 61구역 입구 인증에 쓰이는 보안 출입 장치를 얻습니다.", LocalText),
+        new(Category.Boss, "자동화 공장 수호 기계", "Automated Factory Guardian Machine", "自动化工厂守卫机器",
+            "자동화 공장의 수호자입니다. 61구역 인증에 쓰이는 기지 키를 보유합니다.", LocalText),
+        new(Category.Boss, "최종 보스", "Supreme Intelligence", "最高智能",
+            "처치 후 잔해에서 전리품을 확인할 수 있으며 근처에서 공명 코어를 획득할 수 있습니다.",
+            "공식 Steam 1.0.5 공지")
+    ];
+}

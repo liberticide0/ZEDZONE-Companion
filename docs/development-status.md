@@ -30,4 +30,10 @@
 
 ## v0.4.1 진행 · 독립 변환
 
-CPython 공식 Windows 내장 런타임과 앱의 준비 버튼을 연결한다. TypeTreeGeneratorAPI 상위 프로젝트가 Unity 참조 코드의 라이선스 문제를 명시하고 있어 파서 바이너리는 ZIP에 재배포하지 않는다. 사용자가 최초에 공식 배포처 파일을 가져오거나 미리 준비한 파일을 넣고, 앱은 고정 해시 검증 뒤 로컬에서 실행한다. FMOD 오디오 패키지는 이 흐름에서 사용하지 않는다. 다음은 실제 ZIP에서 최초 준비, 해시 실패, 기존 자료 보존, 변환 후 앱 내 검색을 검증하는 것이다. [TypeTreeGeneratorAPI](https://github.com/UnityPy-Org/TypeTreeGeneratorAPI)
+앱의 `제작 자료 준비`가 ZIP에 포함된 CPython 3.14.10으로 Steam 설치를 읽고, 변환 성공 뒤 검색과 찜목록을 갱신한다. TypeTreeGeneratorAPI 상위 프로젝트가 Unity 참조 코드의 라이선스 문제를 명시하고 있어 ZIP에서 해당 바이너리를 제외했다. 첫 준비에는 공식 배포처에서 고정 해시로 확인한 의존성 파일 8개를 내려받거나 미리 받은 파일을 넣는다. 준비된 환경의 다음 변환에는 다운로드가 필요 없다. [TypeTreeGeneratorAPI](https://github.com/UnityPy-Org/TypeTreeGeneratorAPI)
+
+- 검증 완료. Windows 11에서 ZIP 실행, 다운로드 거절 시 기존 자료 유지, 미리 받은 파일로 최초 변환 및 재시작 없는 검색 갱신을 확인했다. 격리 런타임으로 직접 내려받는 경로와 준비 후 재사용도 확인했다. 자동 검증 44건을 통과했다. [QA 기록](qa.md)
+- Phase 7은 부분 완료다. 현재 Windows 11 호스트에서 다운로드 없는 경로를 검증했다. 시스템 Python이 설치되지 않은 별도 Windows와 네트워크가 물리적으로 분리된 환경, Windows 10은 실측하지 못했다. 파일을 사전에 준비할 수 없는 새 PC의 첫 오프라인 변환은 파서 재배포 권한을 확인하거나 대체 파서를 검증할 때까지 남는다.
+- 다음 실행. 별도 Windows 환경에서 시스템 Python 없이 최초 준비와 재실행을 확인한다. Windows 10, 게임 표시 모드별 포커스, 한글 IME 조합과 DPI는 해당 환경을 확보하면 측정한다. 산출물 34건과 미확인 도구는 공식 런타임 규칙이나 재현 가능한 표본으로 근거가 확보되기 전까지 계산을 보류한다.
+
+로컬 검증본은 `artifacts/ZEDZONE-Companion-0.4.1-win-x64.zip`이며 SHA-256은 `820ddc6d2101ed59856c36ca1880d01ac5d04568350deff000b05defcb5a4fb5`이다. 원격 게시 없음.

@@ -636,8 +636,18 @@ internal sealed class Overlay : Form
         string aliases = string.Join("  ·  ", new[] { entry.English, entry.Chinese, entry.ChineseAlias }
             .Where(name => name.Length > 0).Distinct());
         var document = new DetailDocument();
-        if (aliases.Length > 0)
-            document.Aliases(aliases);
+        if (choice is not null)
+        {
+            document.Heading("제작 방법");
+            foreach (string line in choice.Details.ReplaceLineEndings("\n").Split('\n'))
+            {
+                int separator = line.IndexOf("  ", StringComparison.Ordinal);
+                if (separator > 0)
+                    document.Field(line[..separator], line[(separator + 2)..]);
+                else if (line.Length > 0)
+                    document.Body(line);
+            }
+        }
         if (batch is not null)
         {
             document.Heading(batch.Partial ? "목표 수량 · 부분 계산" : "목표 수량 계산");
@@ -653,19 +663,7 @@ internal sealed class Overlay : Form
                 document.Body($"목표 수량은 {target.Minimum}~{target.Maximum}개로 입력하세요.");
             }
         }
-        if (choice is not null)
-        {
-            document.Heading("제작 방법");
-            foreach (string line in choice.Details.ReplaceLineEndings("\n").Split('\n'))
-            {
-                int separator = line.IndexOf("  ", StringComparison.Ordinal);
-                if (separator > 0)
-                    document.Field(line[..separator], line[(separator + 2)..]);
-                else if (line.Length > 0)
-                    document.Body(line);
-            }
-        }
-        if (entry.Details.Length > 0)
+        if (entry.Details.Length > 0 || aliases.Length > 0)
         {
             document.Heading(entry.Category switch
             {
@@ -673,7 +671,10 @@ internal sealed class Overlay : Form
                 Category.Recipe => "제작 방법",
                 _ => $"{entry.CategoryName} 정보"
             });
-            document.Body(entry.Details);
+            if (aliases.Length > 0)
+                document.Aliases(aliases);
+            if (entry.Details.Length > 0)
+                document.Body(entry.Details);
         }
         if (choice is not null)
             document.Note($"제작법 출처  {choice.Source}");

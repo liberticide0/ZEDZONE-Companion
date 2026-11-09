@@ -9,6 +9,9 @@ internal static class Starter
     internal static readonly Entry[] Entries =
     [
         new(Category.Item, "나뭇가지", "Wood Stick", "树枝", "나무나 덤불에서 얻는 재료.", LocalText, 20),
+        new(Category.Item, "12 게이지", "12 Gauge", "12号散弹",
+            "산탄총 탄약입니다. 제작 가능 여부는 제작법 항목에서 확인할 수 있습니다.",
+            "게임 현지화 · 개발사 MOD 아이템 ID 표", 100),
         new(Category.Item, "나무 화살", "Wooden Arrow", "木箭", "목재 화살. 제작 재료와 수량은 이 항목에서 확인할 수 없습니다.", LocalText, 150),
         new(Category.Item, "돌도끼", "Stone Axe", "石斧", "돌로 만든 도끼.", LocalText, 302),
         new(Category.Item, "돌망치", "Stone Hammer", "石锤", "돌로 만든 망치. 손으로 만드는 방법은 제작 탭에서 확인할 수 있습니다.", LocalText, 303),
@@ -25,6 +28,9 @@ internal static class Starter
         new(Category.Item, "공명 코어", "Resonance Core", "共鸣核心",
             "최종 보스 전투의 보상입니다. 특수 장비 슬롯에 장착하면 적을 밀어내는 음파 능력을 사용할 수 있습니다.",
             "공식 Steam 1.0.5 공지 · 게임 현지화 대조", 1093),
+        new(Category.Recipe, "12 게이지", "12 Gauge", "12号散弹",
+            "게임 내 작업대 제작 목록에 표시됩니다. 작업대 종류, 재료, 생산 수량 및 해금 조건은 미검증입니다.",
+            "게임 내 제작 목록 제보", 100),
         new(Category.Recipe, "돌망치", "Stone Hammer", "石锤",
             "제작 방식  손 제작\n재료·수량·추가 조건  미검증\n\n개발사 문서의 손 제작 예시입니다. 정확한 요구 조건은 게임 제작 화면에서 확인하세요.", ModDocs, 303),
         new(Category.Recipe, "방사능 폭탄", "Radiation Bomb", "辐射炸弹",

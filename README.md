@@ -13,7 +13,7 @@ ZED ZONE 플레이 중 아이템, 제작법, 스킬, 지역, 보스를 빠르게
 
 ## 선택 자료
 
-**자료 열기** 또는 **Ctrl+O**로 아래 파일을 하나씩 선택할 수 있습니다. 처음부터 들어 있는 기본 자료는 24개이며 중국어 자체 검색어를 포함합니다.
+**자료 열기** 또는 **Ctrl+O**로 아래 파일을 하나씩 선택할 수 있습니다. 처음부터 들어 있는 기본 자료는 26개이며 중국어 검색어를 포함합니다.
 
 - `zedzone-localization-v1` 형식의 한국어 현지화 CSV. 검증한 Steam 빌드의 파일 이름은 `Localization_en_to_ko.csv`입니다. 지원되는 텍스트 ID 패턴의 아이템 이름과 설명을 읽습니다.
 - 개발사의 영문 `12_Item_ID_Reference.md`. 영어·중국어 이름과 숫자 ID를 읽습니다. [공식 원본 보기](https://raw.githubusercontent.com/IndieDev-LevenLiu/zedzone/c84e688c5df9c9c6cf93ce851a72ebc716ae4d20/mod-docs/docs/en/12_Item_ID_Reference.md)

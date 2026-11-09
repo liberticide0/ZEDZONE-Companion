@@ -324,6 +324,7 @@ internal sealed class Overlay : Form
         results.DrawMode = DrawMode.OwnerDrawFixed;
         results.ItemHeight = Font.Height + 14;
         results.DrawItem += DrawResult;
+        results.Resize += (_, _) => results.Invalidate();
         panes.Controls.Add(results, 0, 0);
         var detailPanel = new TableLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty, Padding = new Padding(13), BackColor = Surface, ColumnCount = 1, RowCount = 5 };
         detailPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));

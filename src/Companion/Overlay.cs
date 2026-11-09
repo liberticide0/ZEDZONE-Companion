@@ -46,7 +46,7 @@ internal sealed class Overlay : Form
     private readonly ContextMenuStrip menu;
     private int hotkeyId;
     private string shortcut = "";
-    private string localStatus = "기본 자료";
+    private bool detectingSteam = true;
     private nint previous = Native.GetForegroundWindow();
     private uint previousPid;
     private bool exiting;
@@ -87,7 +87,18 @@ internal sealed class Overlay : Form
         };
         results.SelectedIndexChanged += (_, _) => ShowDetails();
         target.TextChanged += (_, _) => ShowDetails();
-        Shown += (_, _) => FocusSearch();
+        Shown += async (_, _) =>
+        {
+            FocusSearch();
+            var detected = await Task.Run(() => Catalog.ReadSteamLocalization(SteamInstall.LocalRoots()));
+            if (IsDisposed || Disposing)
+                return;
+
+            detectingSteam = false;
+            if (catalog.UseSteamLocalization(detected))
+                RefreshResults();
+            UpdateStatus();
+        };
         RefreshResults();
         UpdateStatus();
     }
@@ -200,9 +211,10 @@ internal sealed class Overlay : Form
 
         title.Text = entry.Title;
         metadata.Text = entry.ItemId is int id
-            ? $"{entry.CategoryName}   /   ID {id}"
+            ? $"{entry.CategoryName}   /   {(entry.InferredId ? "추정 ID" : "ID")} {id}"
             : entry.CategoryName;
-        string aliases = string.Join("  ·  ", new[] { entry.English, entry.Chinese }.Where(name => name.Length > 0));
+        string aliases = string.Join("  ·  ", new[] { entry.English, entry.Chinese, entry.ChineseAlias }
+            .Where(name => name.Length > 0).Distinct());
         string estimate = "";
         if (entry.Batch is { } batch)
         {
@@ -210,7 +222,7 @@ internal sealed class Overlay : Form
             {
                 var plan = batch.Calculate(desired);
                 string materials = string.Join(", ", plan.Materials.Select(m => $"{m.Name} {m.PerBatch}개"));
-                estimate = $"{plan.Batches}회 제작 → {plan.Output}개 생산\n확인된 재료  {materials}\n\n";
+                estimate = $"부분 계산  {plan.Batches}회 제작 → {plan.Output}개 생산\n확인된 재료  {materials}\n\n";
             }
             else
             {
@@ -236,13 +248,11 @@ internal sealed class Overlay : Form
             if (dialog.ShowDialog(this) != DialogResult.OK)
                 return;
 
-            var loaded = catalog.Import(dialog.FileName);
-            localStatus = $"현지화 {loaded.Localization:N0} · 공식 ID {loaded.Official:N0}";
+            catalog.Import(dialog.FileName);
             RefreshResults();
             UpdateStatus();
         }
-        catch (Exception error) when (error is IOException or InvalidDataException or UnauthorizedAccessException or ArgumentException
-            or Microsoft.VisualBasic.FileIO.MalformedLineException)
+        catch (Exception error) when (Catalog.IsImportError(error))
         {
             MessageBox.Show(this, $"자료를 열 수 없습니다.\n{error.Message}", AppTitle,
                 MessageBoxButtons.OK, MessageBoxIcon.Warning);
@@ -335,7 +345,8 @@ internal sealed class Overlay : Form
     private void UpdateStatus()
     {
         string key = hotkeyId == 0 ? "단축키 충돌 · 알림 영역에서 열기" : shortcut;
-        status.Text = $"{key}   ·   Esc 닫기   ·   {localStatus}";
+        string data = detectingSteam ? "Steam 자료 확인 중" : catalog.DataStatus;
+        status.Text = $"{key}   ·   Esc 닫기   ·   {data}";
     }
 
     private void OpenPanel()

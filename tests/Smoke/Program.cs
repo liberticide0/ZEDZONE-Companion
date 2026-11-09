@@ -68,6 +68,61 @@ try
     {
         Check(catalog.Find("예제 소총", Category.Item).Single().ItemId == 400, "failed import retains active data");
     }
+
+    string steamapps = Directory.CreateDirectory(Path.Combine(temporary.FullName, "steamapps")).FullName;
+    string library = Directory.CreateDirectory(Path.Combine(temporary.FullName, "second library")).FullName;
+    string libraryApps = Directory.CreateDirectory(Path.Combine(library, "steamapps")).FullName;
+    string installed = Directory.CreateDirectory(Path.Combine(libraryApps, "common", "Test Game",
+        "ZEDZONE_Data", "StreamingAssets", "Localization")).FullName;
+    string libraries = Path.Combine(steamapps, "libraryfolders.vdf");
+    string manifest = Path.Combine(libraryApps, "appmanifest_1211600.acf");
+    string installedCsv = Path.Combine(installed, "Localization_en_to_ko.csv");
+    try
+    {
+        string escaped = library.Replace(@"\", @"\\");
+        File.WriteAllText(libraries, $$"""
+            "libraryfolders" { "1" { "path" "{{escaped}}" "apps" { "1211600" "1" } } }
+            """);
+        File.WriteAllText(manifest, """
+            "AppState" { "appid" "1211600" "installdir" "Test Game" "buildid" "67890" }
+            """);
+        File.WriteAllText(installedCsv, """
+            #format,zedzone-localization-v1
+            #target_lang,한국어,ko
+            id,source,target
+            1000100,Different 12 Gauge,다른 탄약
+            1100100,Example description,예제 설명
+            1000444,Example Part,예제 부품
+            1100444,Example description,예제 설명
+            """);
+        var detected = Catalog.ReadSteamLocalization([temporary.FullName]);
+        var automatic = new Catalog();
+        Check(automatic.UseSteamLocalization(detected) && automatic.DataStatus.Contains("67890"),
+            "Steam secondary library with build provenance");
+        Check(automatic.Find("예제 부품", Category.Item).Single() is { ItemId: 444, InferredId: true },
+            "Steam item is searchable with its inferred ID");
+        Check(automatic.Find("100", Category.Item).Count == 2, "built-in name conflict keeps both entries");
+        Check(!catalog.UseSteamLocalization(detected), "Steam discovery cannot overwrite a manual CSV");
+
+        File.WriteAllText(installedCsv, "invalid");
+        var fallback = new Catalog();
+        Check(!fallback.UseSteamLocalization(Catalog.ReadSteamLocalization([temporary.FullName])) &&
+            fallback.Find("12 게이지", Category.Item).Count == 1, "broken Steam CSV retains built-in search");
+        File.WriteAllText(manifest, """
+            "AppState" { "appid" "1211600" "installdir" "../Test Game" "buildid" "67890" }
+            """);
+        Check(!SteamInstall.FindLocalization([temporary.FullName]).Any(), "manifest path traversal is ignored");
+    }
+    finally
+    {
+        File.Delete(installedCsv);
+        File.Delete(manifest);
+        File.Delete(libraries);
+        for (var directory = new DirectoryInfo(installed); directory.FullName != library; directory = directory.Parent!)
+            directory.Delete();
+        Directory.Delete(library);
+        Directory.Delete(steamapps);
+    }
 }
 finally
 {

@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 Push-Location (Split-Path -Parent $PSScriptRoot)
 try {
     $runtime = '8.0.33'
-    $version = '0.1.1'
+    $version = '0.2.0'
     $staging = Join-Path (Get-Location) 'artifacts/staging'
     dotnet publish src/Companion -c Release -r win-x64 --self-contained true `
         "-p:RuntimeFrameworkVersion=$runtime" -p:PublishSingleFile=true `

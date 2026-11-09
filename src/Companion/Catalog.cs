@@ -8,7 +8,7 @@ internal enum Category { Item, Recipe, Skill, Map, Boss }
 
 internal sealed record Entry(
     Category Category, string Korean, string English, string Chinese, string Details, string Source,
-    int? ItemId = null, RecipeBatch? Batch = null)
+    int? ItemId = null, RecipeBatch? Batch = null, bool InferredId = false, string ChineseAlias = "")
 {
     public string Title => Korean.Length > 0 ? Korean : English.Length > 0 ? English : Chinese;
     public string CategoryName => Category switch
@@ -40,21 +40,41 @@ internal sealed class Catalog
     private static readonly StringComparer KoreanOrder = StringComparer.Create(CultureInfo.GetCultureInfo("ko-KR"), false);
     private List<Entry> localization = [];
     private List<Entry> official = [];
+    private bool manuallyLoadedLocalization;
+    private string localizationLabel = "";
+    public string DataStatus
+    {
+        get
+        {
+            string status = localization.Count == 0 ? "기본 자료" : $"{localizationLabel} 후보 {localization.Count:N0}";
+            return official.Count == 0 ? status : $"{status} · 공식 ID {official.Count:N0}";
+        }
+    }
 
     private IEnumerable<Entry> Entries()
     {
-        var starterIds = Starter.Entries.Where(e => e.Category == Category.Item).Select(e => e.ItemId).ToHashSet();
-        var items = localization.Where(e => !starterIds.Contains(e.ItemId))
-            .ToDictionary(e => e.ItemId!.Value);
+        var items = localization.ToDictionary(e => e.ItemId!.Value);
         foreach (var entry in Starter.Entries)
-            yield return entry;
+        {
+            if (entry.Category == Category.Item && entry.ItemId is int id &&
+                items.TryGetValue(id, out var item) && SameEnglishName(entry, item))
+            {
+                items[id] = item with { Chinese = entry.Chinese, Source = item.Source + " / 중국어는 기본 자료 별칭" };
+            }
+            else
+            {
+                yield return entry;
+            }
+        }
 
         foreach (var reference in official)
         {
             int id = reference.ItemId!.Value;
             if (items.TryGetValue(id, out var item) && SameEnglishName(item, reference))
             {
-                items[id] = item with { Chinese = reference.Chinese, Source = item.Source + " / 중국어는 공식 ID 표" };
+                if (reference.Chinese.Length > 0)
+                    items[id] = item with { Chinese = reference.Chinese, ChineseAlias = item.Chinese,
+                        Source = item.Source + " / 공식 ID 표(버전 미상)와 ID·영문명 일치" };
                 continue;
             }
             // A shared ID alone does not establish that names from two builds describe the same item.
@@ -86,14 +106,15 @@ internal sealed class Catalog
 
     public (int Localization, int Official) Import(string path)
     {
-        if (new FileInfo(path).Length > 16 * 1024 * 1024)
-            throw new InvalidDataException("자료 파일 크기는 16MB 이하여야 합니다.");
+        ValidateFileSize(path);
 
         // Replace each table only after a complete, valid read.
         switch (Path.GetExtension(path).ToLowerInvariant())
         {
             case ".csv":
-                localization = ReadLocalization(path);
+                localization = ReadLocalization(path, "직접 선택한 한국어 현지화 표 · 빌드 미상");
+                manuallyLoadedLocalization = true;
+                localizationLabel = "수동 현지화";
                 break;
             case ".md":
                 official = ReadOfficialReference(path);
@@ -102,6 +123,43 @@ internal sealed class Catalog
                 throw new InvalidDataException("한국어 현지화 CSV 또는 개발사의 영문 아이템 ID 표를 선택하세요.");
         }
         return (localization.Count, official.Count);
+    }
+
+    internal static (List<Entry> Entries, string Build)? ReadSteamLocalization(IEnumerable<string> roots)
+    {
+        foreach (var (path, build) in SteamInstall.FindLocalization(roots))
+        {
+            try
+            {
+                ValidateFileSize(path);
+                string source = build.Length == 0 ? "Steam 설치 현지화 · 빌드 미상" : $"Steam 설치 현지화 · 빌드 {build}";
+                return (ReadLocalization(path, source), build);
+            }
+            catch (Exception error) when (IsImportError(error))
+            {
+                // A stale or unreadable library can coexist with another usable installation.
+            }
+        }
+        return null;
+    }
+
+    internal bool UseSteamLocalization((List<Entry> Entries, string Build)? detected)
+    {
+        if (manuallyLoadedLocalization || detected is not { } data)
+            return false;
+
+        localization = data.Entries;
+        localizationLabel = data.Build.Length == 0 ? "Steam 현지화" : $"Steam {data.Build}";
+        return true;
+    }
+
+    internal static bool IsImportError(Exception error) => error is IOException or InvalidDataException or
+        UnauthorizedAccessException or ArgumentException or MalformedLineException or System.Security.SecurityException;
+
+    private static void ValidateFileSize(string path)
+    {
+        if (new FileInfo(path).Length > 16 * 1024 * 1024)
+            throw new InvalidDataException("자료 파일 크기는 16MB 이하여야 합니다.");
     }
 
     private static List<Entry> ReadOfficialReference(string path)
@@ -129,7 +187,7 @@ internal sealed class Catalog
         return entries.Values.ToList();
     }
 
-    private static List<Entry> ReadLocalization(string path)
+    private static List<Entry> ReadLocalization(string path, string source)
     {
         using var parser = new TextFieldParser(path, new UTF8Encoding(false, true));
         parser.SetDelimiters(",");
@@ -171,7 +229,7 @@ internal sealed class Catalog
                 body = Clean(description.English);
 
             entries.Add(new Entry(Category.Item, ko, en, "", body,
-                "직접 선택한 한국어 현지화 표 · 텍스트 ID로 분류", textId - 1_000_000));
+                source + " · 아이템 후보, 텍스트 ID 기준", textId - 1_000_000, InferredId: true));
         }
 
         if (entries.Count == 0)
@@ -190,7 +248,7 @@ internal sealed class Catalog
 
     private static int Score(Entry entry, string[] terms)
     {
-        var names = new[] { Normalize(entry.Korean), Normalize(entry.English), Normalize(entry.Chinese) };
+        var names = new[] { Normalize(entry.Korean), Normalize(entry.English), Normalize(entry.Chinese), Normalize(entry.ChineseAlias) };
         string id = entry.ItemId?.ToString(CultureInfo.InvariantCulture) ?? "";
         string details = Normalize(entry.Details);
         int total = 0;

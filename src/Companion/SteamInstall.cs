@@ -41,7 +41,7 @@ internal static class SteamInstall
             yield return Path.Combine(programFiles, "Steam");
     }
 
-    internal static IEnumerable<(string Path, string Build)> FindLocalization(IEnumerable<string> steamRoots)
+    internal static IEnumerable<(string Path, string Build, string GameDirectory)> FindLocalization(IEnumerable<string> steamRoots)
     {
         var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (string root in steamRoots)
@@ -60,10 +60,11 @@ internal static class SteamInstall
                     folder.Contains('/') || folder.Contains('\\') || folder.Contains(':'))
                     continue;
 
-                string csv = Path.Combine(library, "steamapps", "common", folder, "ZEDZONE_Data",
+                string game = Path.Combine(library, "steamapps", "common", folder);
+                string csv = Path.Combine(game, "ZEDZONE_Data",
                     "StreamingAssets", "Localization", "Localization_en_to_ko.csv");
                 if (File.Exists(csv))
-                    yield return (csv, build is { Length: > 0 } && build.All(char.IsAsciiDigit) ? build : "");
+                    yield return (csv, build is { Length: > 0 and <= 20 } && build.All(char.IsAsciiDigit) ? build : "", game);
             }
         }
     }

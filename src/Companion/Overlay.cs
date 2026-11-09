@@ -33,6 +33,8 @@ internal sealed class Overlay : Form
     private readonly Button wishlistToggle = ActionButton("찜목록");
     private readonly Button sizeToggle = ActionButton("작게");
     private readonly Button saveGoal = ActionButton("목표 저장");
+    private readonly Button prepareRecipes = ActionButton("제작 자료 준비");
+    private readonly CancellationTokenSource preparationLifetime = new();
     private readonly Panel side = new() { Dock = DockStyle.Fill, Margin = Padding.Empty };
     private readonly ListBox goals = new()
     {
@@ -73,6 +75,9 @@ internal sealed class Overlay : Form
     private int hotkeyId;
     private string shortcut = "";
     private bool detectingSteam = true;
+    private bool preparingRecipes;
+    private string? steamGameDirectory;
+    private string? preparationStatus;
     private nint previous = Native.GetForegroundWindow();
     private uint previousPid;
     private bool exiting;
@@ -113,6 +118,9 @@ internal sealed class Overlay : Form
         }
         wishlistToggle.Click += (_, _) => ToggleWishlist();
         saveGoal.Click += (_, _) => SaveGoal();
+        prepareRecipes.Visible = RecipePreparation.IsAvailable;
+        prepareRecipes.Enabled = false;
+        prepareRecipes.Click += async (_, _) => await PrepareRecipesAsync();
         goals.DoubleClick += (_, _) => OpenGoal();
         goals.KeyDown += (_, e) =>
         {
@@ -149,15 +157,13 @@ internal sealed class Overlay : Form
         Shown += async (_, _) =>
         {
             FocusSearch();
-            var (detected, recipes) = await Task.Run(() =>
-            {
-                var localization = Catalog.ReadSteamLocalization(SteamInstall.LocalRoots());
-                return (localization, localization is { } data ? RecipeSnapshot.ReadInstalled(data.Build) : null);
-            });
+            var (detected, recipes, game) = await Task.Run(ReadInstalledData);
             if (IsDisposed || Disposing)
                 return;
 
             detectingSteam = false;
+            steamGameDirectory = game;
+            prepareRecipes.Enabled = game is not null;
             if (catalog.UseSteamLocalization(detected, recipes))
                 RefreshResults();
             RefreshWishlist();
@@ -166,6 +172,90 @@ internal sealed class Overlay : Form
         RefreshResults();
         RefreshWishlist();
         UpdateStatus();
+    }
+
+    private static ((List<Entry> Entries, string Build)? Localization, RecipeSnapshot? Recipes, string? Game)
+        ReadInstalledData()
+    {
+        var localization = Catalog.ReadSteamLocalization(SteamInstall.LocalRoots(), out string? game);
+        return (localization, localization is { } data ? RecipeSnapshot.ReadInstalled(data.Build) : null,
+            localization is { Build.Length: > 0 } ? game : null);
+    }
+
+    private async Task PrepareRecipesAsync()
+    {
+        if (preparingRecipes || steamGameDirectory is not { } game)
+            return;
+        preparingRecipes = true;
+        prepareRecipes.Enabled = false;
+        preparationStatus = "제작 자료 준비 중";
+        UpdateStatus();
+        try
+        {
+            int exit = await RecipePreparation.RunAsync(game, allowDownload: false, preparationLifetime.Token);
+            if (exit == RecipePreparation.PackagesRequired)
+            {
+                if (!Visible)
+                {
+                    preparationStatus = "변환 도구가 필요합니다. 제작 자료 준비를 다시 선택하세요.";
+                    return;
+                }
+                fileDialogOpen = true;
+                DialogResult choice;
+                try
+                {
+                    choice = MessageBox.Show(this,
+                        "이 PC에 변환 도구가 없습니다. 최초 한 번 PyPI 배포처에서 약 17MB를 내려받아 해시를 확인합니다. 내려받을까요?",
+                        AppTitle, MessageBoxButtons.YesNo, MessageBoxIcon.Question, MessageBoxDefaultButton.Button2);
+                }
+                finally
+                {
+                    fileDialogOpen = false;
+                }
+                if (choice != DialogResult.Yes)
+                {
+                    preparationStatus = "다운로드를 건너뛰었습니다.";
+                    return;
+                }
+                exit = await RecipePreparation.RunAsync(game, allowDownload: true, preparationLifetime.Token);
+            }
+            if (exit != 0)
+            {
+                preparationStatus = "제작 자료 준비 실패 · 기존 자료를 유지합니다.";
+                return;
+            }
+            var (localization, recipes, currentGame) = await Task.Run(ReadInstalledData);
+            if (IsDisposed || Disposing)
+                return;
+            if (recipes is null)
+            {
+                preparationStatus = "현재 Steam 빌드의 변환 자료를 열 수 없습니다.";
+                return;
+            }
+            steamGameDirectory = currentGame;
+            catalog.UseSteamLocalization(localization, recipes);
+            RefreshResults();
+            RefreshWishlist();
+            preparationStatus = null;
+        }
+        catch (OperationCanceledException) when (preparationLifetime.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception error) when (Catalog.IsImportError(error) || error is System.ComponentModel.Win32Exception
+            or TimeoutException or InvalidOperationException)
+        {
+            preparationStatus = "제작 자료 준비 실패 · 기존 자료를 유지합니다.";
+        }
+        finally
+        {
+            preparingRecipes = false;
+            if (!IsDisposed && !Disposing)
+            {
+                prepareRecipes.Enabled = steamGameDirectory is not null;
+                UpdateStatus();
+            }
+        }
     }
 
     private void BuildLayout()
@@ -200,8 +290,9 @@ internal sealed class Overlay : Form
         header.Controls.Add(close, 2, 0);
         root.Controls.Add(header, 0, 0);
 
-        var searchRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Margin = Padding.Empty };
+        var searchRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 4, RowCount = 1, Margin = Padding.Empty };
         searchRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        searchRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         searchRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         searchRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         query.Dock = DockStyle.Fill;
@@ -213,6 +304,7 @@ internal sealed class Overlay : Form
         searchRow.Controls.Add(query, 0, 0);
         searchRow.Controls.Add(filter, 1, 0);
         searchRow.Controls.Add(import, 2, 0);
+        searchRow.Controls.Add(prepareRecipes, 3, 0);
         root.Controls.Add(searchRow, 0, 1);
         root.Controls.Add(count, 0, 2);
 
@@ -666,6 +758,8 @@ internal sealed class Overlay : Form
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
+        preparationLifetime.Cancel();
+        preparationLifetime.Dispose();
         tray.Visible = false;
         tray.Dispose();
         menu.Dispose();
@@ -675,7 +769,7 @@ internal sealed class Overlay : Form
     private void UpdateStatus()
     {
         string key = hotkeyId == 0 ? "단축키 충돌 · 알림 영역에서 열기" : shortcut;
-        string data = detectingSteam ? "Steam 자료 확인 중" : catalog.DataStatus;
+        string data = preparationStatus ?? (detectingSteam ? "Steam 자료 확인 중" : catalog.DataStatus);
         status.Text = wishlistUnreadable ? "찜목록 파일 읽기 실패 · 기존 파일을 보존합니다." :
             $"{key}   ·   Esc 닫기   ·   {data}";
     }

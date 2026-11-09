@@ -27,3 +27,7 @@
 | 7 · 포터블 | 로컬 ZIP과 해시를 확인했다. Python 없이 처음 제작법을 준비하는 변환기 배포는 남았다. 오디오 모듈 없이 동일 스냅샷이 생성됐고, 확인된 로딩 의존성은 UnityPy, TypeTreeGeneratorAPI, attrs, brotli, fsspec, lz4, Pillow, tpk_ar였다. 다음은 이 최소 구성의 네이티브 의존성과 라이선스 고지 확인, 독립 Windows 환경에서의 오프라인 첫 실행이다. |
 
 로컬 검증본은 `artifacts/ZEDZONE-Companion-0.4.0-win-x64.zip`, SHA-256은 `334e72b8642b85541e93a23ef706f1ff366975fbbed43184be73f28803284edc`이다. 원격 게시 없음. [실측 절차와 제한](qa.md)
+
+## v0.4.1 진행 · 독립 변환
+
+CPython 공식 Windows 내장 런타임과 앱의 준비 버튼을 연결한다. TypeTreeGeneratorAPI 상위 프로젝트가 Unity 참조 코드의 라이선스 문제를 명시하고 있어 파서 바이너리는 ZIP에 재배포하지 않는다. 사용자가 최초에 공식 배포처 파일을 가져오거나 미리 준비한 파일을 넣고, 앱은 고정 해시 검증 뒤 로컬에서 실행한다. FMOD 오디오 패키지는 이 흐름에서 사용하지 않는다. 다음은 실제 ZIP에서 최초 준비, 해시 실패, 기존 자료 보존, 변환 후 앱 내 검색을 검증하는 것이다. [TypeTreeGeneratorAPI](https://github.com/UnityPy-Org/TypeTreeGeneratorAPI)

@@ -214,15 +214,22 @@ internal sealed class Catalog
         return (localization.Count, official.Count);
     }
 
-    internal static (List<Entry> Entries, string Build)? ReadSteamLocalization(IEnumerable<string> roots)
+    internal static (List<Entry> Entries, string Build)? ReadSteamLocalization(IEnumerable<string> roots) =>
+        ReadSteamLocalization(roots, out _);
+
+    internal static (List<Entry> Entries, string Build)? ReadSteamLocalization(
+        IEnumerable<string> roots, out string? gameDirectory)
     {
-        foreach (var (path, build) in SteamInstall.FindLocalization(roots))
+        gameDirectory = null;
+        foreach (var (path, build, game) in SteamInstall.FindLocalization(roots))
         {
             try
             {
                 ValidateFileSize(path);
                 string source = build.Length == 0 ? "Steam 설치 현지화 · 빌드 미상" : $"Steam 설치 현지화 · 빌드 {build}";
-                return (ReadLocalization(path, source), build);
+                var loaded = ReadLocalization(path, source);
+                gameDirectory = game;
+                return (loaded, build);
             }
             catch (Exception error) when (IsImportError(error))
             {
@@ -237,8 +244,7 @@ internal sealed class Catalog
         if (detected is not { } data)
             return false;
 
-        if (recipes?.Build == data.Build)
-            recipeSnapshot = recipes;
+        recipeSnapshot = recipes?.Build == data.Build ? recipes : null;
         entries = null;
         if (manuallyLoadedLocalization)
             return recipeSnapshot is not null;

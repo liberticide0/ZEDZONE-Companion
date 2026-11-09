@@ -30,14 +30,11 @@ ZED ZONE 플레이 중 아이템, 제작법, 스킬, 지역, 보스를 빠르게
 
 ## 설치 파일의 제작법 준비
 
-기본 검색에는 Python이 필요하지 않습니다. 설치된 게임의 정적 제작법을 추가하려면 ZIP의 `probe-recipes.py`를 Python에서 실행합니다. 패키지 설치는 최초 한 번이며, 그 후 변환과 Companion 검색은 로컬에서 처리합니다.
+ZIP을 풀고 **제작 자료 준비**를 선택하세요. 앱은 Steam에 설치된 게임을 찾아 ZIP에 포함된 격리 실행 환경에서 변환합니다. 별도 Python이나 SDK를 설치할 필요가 없습니다. 변환 도구가 없는 경우에만 PyPI에서 확인된 파일을 내려받을지 묻습니다. 준비 뒤에는 인터넷 연결 없이 재변환할 수 있고, 앱을 재시작하지 않아도 새 자료를 검색할 수 있습니다.
 
-```powershell
-python -m pip install UnityPy==1.25.4 TypeTreeGeneratorAPI==0.0.10
-python probe-recipes.py "C:\Program Files (x86)\Steam\steamapps\common\ZED ZONE" --snapshot
-```
+최초 준비도 오프라인으로 해야 한다면, `converter/converter-packages.json`에 적힌 배포처 파일 8개를 그대로 받아 `%LOCALAPPDATA%\ZEDZONE.Companion\converter-packages`에 넣은 뒤 **제작 자료 준비**를 선택하세요. 앱은 파일 이름과 SHA-256이 맞는 자료만 사용합니다. 게임 설치 파일이나 변환 자료를 다른 PC로 복사할 필요는 없습니다.
 
-다른 Steam 라이브러리를 쓰면 명령의 게임 폴더를 바꾸세요. 스크립트는 게임을 변경하지 않고 Windows 사용자 데이터 폴더에 빌드별 자료를 만듭니다. 생성 후 알림 영역에서 Companion을 종료했다가 다시 열면 해당 빌드의 자료를 읽습니다. Steam이 업데이트되면 변환을 다시 실행합니다. 작업대별 제작법, 도구·해금 관련 미검증 값과 원본에 기록된 요구 수치를 구분해 표시합니다. Workshop과 실행 중 추가되는 제작법은 범위 밖입니다.
+변환은 게임을 변경하지 않고 Windows 사용자 데이터 폴더에 빌드별 자료를 만듭니다. Steam이 업데이트되면 다시 **제작 자료 준비**를 선택합니다. 작업대별 제작법, 도구·해금 관련 미검증 값과 원본에 기록된 요구 수치를 구분해 표시합니다. Workshop과 실행 중 추가되는 제작법은 범위 밖입니다.
 
 ## 검증 범위
 

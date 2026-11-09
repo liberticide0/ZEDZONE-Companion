@@ -137,7 +137,7 @@ def read_guides(resources, text: dict):
 
 
 def write_snapshot(game: Path) -> Path:
-    game = game.resolve(strict=True)
+    game = Path(os.path.abspath(game))
     data = game / "ZEDZONE_Data"
     manifest = game.parents[1] / "appmanifest_1211600.acf"
     localization = data / "StreamingAssets" / "Localization" / "Localization_en_to_ko.csv"

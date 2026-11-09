@@ -3,6 +3,10 @@ namespace Companion;
 internal sealed class Overlay : Form
 {
     private const string AppTitle = "ZED ZONE Companion";
+    private const string PrepareLabel = "Steam 제작법 불러오기";
+    private const string ImportLabel = "자료 파일 가져오기";
+    private const string PrepareHint = "설치된 ZED ZONE에서 제작법을 읽습니다. Steam 업데이트 후 다시 실행하세요.";
+    private const string ImportHint = "한국어 현지화 CSV 또는 아이템 ID 표를 직접 선택합니다.";
     private static readonly Color Ink = Color.FromArgb(235, 241, 238);
     private static readonly Color Muted = Color.FromArgb(162, 181, 171);
     private static readonly Color Surface = Color.FromArgb(28, 39, 35);
@@ -33,7 +37,8 @@ internal sealed class Overlay : Form
     private readonly Button wishlistToggle = ActionButton("찜목록");
     private readonly Button sizeToggle = ActionButton("작게");
     private readonly Button saveGoal = ActionButton("목표 저장");
-    private readonly Button prepareRecipes = ActionButton("제작 자료 준비");
+    private readonly Button prepareRecipes = ActionButton(PrepareLabel);
+    private readonly ToolTip hints = new() { ShowAlways = true };
     private readonly CancellationTokenSource preparationLifetime = new();
     private readonly Panel side = new() { Dock = DockStyle.Fill, Margin = Padding.Empty };
     private readonly ListBox goals = new()
@@ -95,7 +100,7 @@ internal sealed class Overlay : Form
         ClientSize = new Size(880, 570);
         MinimumSize = new Size(595, 410);
         FormBorderStyle = FormBorderStyle.None;
-        Opacity = 0.96;
+        Opacity = 0.98;
         TopMost = true;
 
         menu = new ContextMenuStrip();
@@ -188,7 +193,7 @@ internal sealed class Overlay : Form
             return;
         preparingRecipes = true;
         prepareRecipes.Enabled = false;
-        preparationStatus = "제작 자료 준비 중";
+        preparationStatus = "Steam 제작법을 불러오는 중…";
         UpdateStatus();
         try
         {
@@ -197,7 +202,7 @@ internal sealed class Overlay : Form
             {
                 if (!Visible)
                 {
-                    preparationStatus = "변환 도구가 필요합니다. 제작 자료 준비를 다시 선택하세요.";
+                    preparationStatus = $"변환 도구가 필요합니다. {PrepareLabel}를 다시 선택하세요.";
                     return;
                 }
                 fileDialogOpen = true;
@@ -221,7 +226,7 @@ internal sealed class Overlay : Form
             }
             if (exit != 0)
             {
-                preparationStatus = "제작 자료 준비 실패 · 기존 자료를 유지합니다.";
+                preparationStatus = "제작법을 불러오지 못했습니다. 기존 자료를 유지합니다.";
                 return;
             }
             var (localization, recipes, currentGame) = await Task.Run(ReadInstalledData);
@@ -245,7 +250,7 @@ internal sealed class Overlay : Form
         catch (Exception error) when (Catalog.IsImportError(error) || error is System.ComponentModel.Win32Exception
             or TimeoutException or InvalidOperationException)
         {
-            preparationStatus = "제작 자료 준비 실패 · 기존 자료를 유지합니다.";
+            preparationStatus = "제작법을 불러오지 못했습니다. 기존 자료를 유지합니다.";
         }
         finally
         {
@@ -298,8 +303,11 @@ internal sealed class Overlay : Form
         query.Dock = DockStyle.Fill;
         filter.Items.AddRange(["전체", "아이템", "제작법", "스킬", "지도", "보스"]);
         filter.SelectedIndex = 0;
-        var import = new Button { Text = "자료 열기", AutoSize = true, FlatStyle = FlatStyle.Flat, BackColor = Surface, ForeColor = Ink };
-        import.FlatAppearance.BorderColor = Muted;
+        var import = ActionButton(ImportLabel);
+        import.AccessibleDescription = ImportHint;
+        prepareRecipes.AccessibleDescription = PrepareHint;
+        hints.SetToolTip(import, ImportHint);
+        hints.SetToolTip(prepareRecipes, PrepareHint);
         import.Click += (_, _) => Import();
         searchRow.Controls.Add(query, 0, 0);
         searchRow.Controls.Add(filter, 1, 0);
@@ -346,8 +354,9 @@ internal sealed class Overlay : Form
         wishlistView.Hide();
         panes.Controls.Add(side, 1, 0);
         root.Controls.Add(panes, 0, 3);
-        var footer = new TableLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty, ColumnCount = 2 };
+        var footer = new TableLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty, ColumnCount = 3 };
         footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         status.AutoSize = false;
         status.Dock = DockStyle.Fill;
@@ -357,7 +366,12 @@ internal sealed class Overlay : Form
         sizeToggle.AccessibleName = "창 크기 전환";
         sizeToggle.Margin = new Padding(3, 0, 0, 0);
         sizeToggle.Click += (_, _) => ToggleSize();
-        footer.Controls.Add(sizeToggle, 1, 0);
+        var help = ActionButton("단축키 · 도움말");
+        help.Margin = new Padding(3, 0, 0, 0);
+        hints.SetToolTip(help, "단축키와 자료 버튼 안내 (F1)");
+        help.Click += (_, _) => ShowHelpGuide();
+        footer.Controls.Add(help, 1, 0);
+        footer.Controls.Add(sizeToggle, 2, 0);
         root.Controls.Add(footer, 0, 4);
     }
 
@@ -532,9 +546,17 @@ internal sealed class Overlay : Form
         bool selected = (e.State & DrawItemState.Selected) != 0;
         using var background = new SolidBrush(selected ? Color.FromArgb(49, 74, 62) : Surface);
         e.Graphics.FillRectangle(background, e.Bounds);
-        var bounds = Rectangle.Inflate(e.Bounds, -9, 0);
-        TextRenderer.DrawText(e.Graphics, entry.ToString(), Font,
-            bounds, Ink, TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix);
+        var bounds = Rectangle.Inflate(e.Bounds, -LogicalToDeviceUnits(9), 0);
+        var flags = TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine |
+            TextFormatFlags.EndEllipsis | TextFormatFlags.NoPrefix | TextFormatFlags.NoPadding;
+        int tagWidth = LogicalToDeviceUnits(53);
+        var tag = new Rectangle(bounds.Right - tagWidth, bounds.Top + LogicalToDeviceUnits(5),
+            tagWidth, bounds.Height - LogicalToDeviceUnits(10));
+        using var tagBackground = new SolidBrush(selected ? Color.FromArgb(61, 89, 73) : Color.FromArgb(40, 56, 48));
+        e.Graphics.FillRectangle(tagBackground, tag);
+        TextRenderer.DrawText(e.Graphics, entry.CategoryName, Font, tag, Muted, flags | TextFormatFlags.HorizontalCenter);
+        bounds.Width -= tagWidth + LogicalToDeviceUnits(9);
+        TextRenderer.DrawText(e.Graphics, entry.Title, Font, bounds, Ink, flags);
         e.DrawFocusRectangle();
     }
 
@@ -609,29 +631,54 @@ internal sealed class Overlay : Form
         saveGoal.Visible = canSaveGoal;
         title.Text = entry.Title;
         metadata.Text = entry.ItemId is int id
-            ? $"{entry.CategoryName}   /   {(entry.InferredId ? "추정 ID" : "ID")} {id}"
+            ? $"{entry.CategoryName}     {(entry.InferredId ? "추정 ID" : "ID")} {id}"
             : entry.CategoryName;
         string aliases = string.Join("  ·  ", new[] { entry.English, entry.Chinese, entry.ChineseAlias }
             .Where(name => name.Length > 0).Distinct());
-        string estimate = "";
+        var document = new DetailDocument();
+        if (aliases.Length > 0)
+            document.Aliases(aliases);
         if (batch is not null)
         {
+            document.Heading(batch.Partial ? "목표 수량 · 부분 계산" : "목표 수량 계산");
             if (int.TryParse(target.Text, out int desired) && desired >= target.Minimum && desired <= target.Maximum)
             {
                 var plan = batch.Calculate(desired);
-                string materials = string.Join(", ", plan.Materials.Select(m => $"{m.Name} {m.PerBatch:0.######}개"));
-                string label = batch.Partial ? "부분 계산" : "목표 계산";
-                estimate = $"{label}  {plan.Batches}회 제작 → {plan.Output}개 생산\n확인된 재료  {materials}\n\n";
+                document.Field("제작 횟수", $"{plan.Batches:N0}회 → {plan.Output:N0}개 생산");
+                if (plan.Materials.Length > 0)
+                    document.Field("확인된 재료", string.Join(", ", plan.Materials.Select(m => $"{m.Name} {m.PerBatch:0.######}개")));
             }
             else
             {
-                estimate = $"목표 수량은 {target.Minimum}~{target.Maximum}개로 입력하세요.\n\n";
+                document.Body($"목표 수량은 {target.Minimum}~{target.Maximum}개로 입력하세요.");
             }
         }
-        details.Text = (aliases.Length == 0 ? "" : $"{aliases}\n\n") +
-            (choice is null
-                ? $"{entry.Details}\n\n출처  {entry.Source}"
-                : $"{estimate}{choice.Details}\n\n제작법 출처  {choice.Source}\n\n아이템 정보\n{entry.Details}\n\n출처  {entry.Source}");
+        if (choice is not null)
+        {
+            document.Heading("제작 방법");
+            foreach (string line in choice.Details.ReplaceLineEndings("\n").Split('\n'))
+            {
+                int separator = line.IndexOf("  ", StringComparison.Ordinal);
+                if (separator > 0)
+                    document.Field(line[..separator], line[(separator + 2)..]);
+                else if (line.Length > 0)
+                    document.Body(line);
+            }
+        }
+        if (entry.Details.Length > 0)
+        {
+            document.Heading(entry.Category switch
+            {
+                Category.Item => "아이템 정보",
+                Category.Recipe => "제작 방법",
+                _ => $"{entry.CategoryName} 정보"
+            });
+            document.Body(entry.Details);
+        }
+        if (choice is not null)
+            document.Note($"제작법 출처  {choice.Source}");
+        document.Note($"출처  {entry.Source}");
+        details.Rtf = document.ToString();
         details.Select(0, 0);
         details.ScrollToCaret();
     }
@@ -723,6 +770,11 @@ internal sealed class Overlay : Form
             Import();
             return true;
         }
+        if (keyData == Keys.F1)
+        {
+            ShowHelpGuide();
+            return true;
+        }
         if (keyData == (Keys.Control | Keys.R) && recipeSelector.Visible)
         {
             recipeSelector.Focus();
@@ -763,15 +815,56 @@ internal sealed class Overlay : Form
         tray.Visible = false;
         tray.Dispose();
         menu.Dispose();
+        hints.Dispose();
         base.OnFormClosed(e);
     }
 
     private void UpdateStatus()
     {
         string key = hotkeyId == 0 ? "단축키 충돌 · 알림 영역에서 열기" : shortcut;
-        string data = preparationStatus ?? (detectingSteam ? "Steam 자료 확인 중" : catalog.DataStatus);
+        string data = detectingSteam ? "Steam 확인 중…"
+            : catalog.RecipeBuild.Length > 0 ? "제작법 준비됨"
+            : steamGameDirectory is not null && RecipePreparation.IsAvailable ? "제작법 불러오기 필요"
+            : "아이템 검색 가능";
         status.Text = wishlistUnreadable ? "찜목록 파일 읽기 실패 · 기존 파일을 보존합니다." :
-            $"{key}   ·   Esc 닫기   ·   {data}";
+            preparationStatus ?? $"{key}  ·  Esc 닫기  ·  {data}";
+    }
+
+    private void ShowHelpGuide()
+    {
+        fileDialogOpen = true;
+        try
+        {
+            string open = hotkeyId == 0 ? "Windows 알림 영역 아이콘" : shortcut;
+            MessageBox.Show(this,
+                $"""
+                단축키
+
+                {open}   오버레이 열기
+                Esc   오버레이 닫기
+                Ctrl+F   검색어 입력으로 이동
+                ↓   검색 결과 목록으로 이동
+                Ctrl+R   제작법 선택으로 이동 (제작법이 있는 항목)
+                Ctrl+D   현재 아이템의 목표 수량 저장
+                Ctrl+L   찜목록 열기 / 상세로 돌아가기
+                Ctrl+O   자료 파일 가져오기
+                Ctrl+-   창 크기 전환
+                F1   이 안내 열기
+
+                자료 버튼
+
+                {PrepareLabel}
+                {PrepareHint} 변환 도구가 없으면 다운로드 여부를 묻습니다.
+
+                {ImportLabel}
+                {ImportHint} Steam 설치가 감지되면 파일 선택 없이 검색할 수 있습니다.
+                """,
+                "단축키 및 자료 안내", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        }
+        finally
+        {
+            fileDialogOpen = false;
+        }
     }
 
     private void OpenPanel()

@@ -21,7 +21,7 @@ internal sealed record Entry(
         Category.Boss => "보스",
         _ => ""
     };
-    public override string ToString() => $"{CategoryName}  ·  {Title}";
+    public override string ToString() => $"{Title} ({CategoryName})";
 }
 
 internal sealed record Material(string Name, decimal PerBatch, int? Id = null);

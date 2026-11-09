@@ -49,7 +49,8 @@ internal sealed class Overlay : Form
     private readonly RichTextBox planText = new()
     {
         AccessibleName = "찜목록 합산 제작 계획", BackColor = Surface, ForeColor = Ink,
-        Dock = DockStyle.Fill, BorderStyle = BorderStyle.None, ReadOnly = true, DetectUrls = false
+        Dock = DockStyle.Fill, BorderStyle = BorderStyle.None, ReadOnly = true, DetectUrls = false,
+        ScrollBars = RichTextBoxScrollBars.Vertical
     };
     private Control detailView = null!;
     private Control wishlistView = null!;
@@ -510,29 +511,38 @@ internal sealed class Overlay : Form
         try
         {
             var plan = CraftPlanner.Calculate(wishlist, catalog.RecipeBuild, catalog.Item);
-            var lines = new List<string>();
+            var document = new DetailDocument();
             if (plan.Materials.Length > 0)
             {
-                lines.Add("직접 확보할 재료");
-                lines.AddRange(plan.Materials.Select(m => $"  {m.Name}  × {m.Quantity:0.######}"));
+                document.Heading("직접 확보할 재료");
+                foreach (var material in plan.Materials)
+                    document.Field($"× {material.Quantity:0.######}", material.Name, indent: 1440);
             }
             if (plan.Tools.Length > 0)
             {
-                lines.Add("\n필요 도구");
-                lines.AddRange(plan.Tools.Select(m => $"  {m.Name}  × {m.Quantity:0.######}"));
+                document.Heading("필요 도구");
+                foreach (var tool in plan.Tools)
+                    document.Field($"× {tool.Quantity:0.######}", tool.Name, indent: 1440);
             }
             if (plan.Steps.Length > 0)
             {
-                lines.Add("\n제작 순서");
-                lines.AddRange(plan.Steps.Select(s => $"  {s.Name} · {s.Station} · {s.Batches:N0}회 → {s.Output:N0}개"));
+                document.Heading("제작 순서");
+                int number = 0;
+                foreach (var step in plan.Steps)
+                    document.Step($"{++number}. {step.Name}",
+                        $"{step.Station}   ·   {step.Batches:N0}회 제작 → {step.Output:N0}개");
             }
             if (plan.Warnings.Length > 0)
             {
-                lines.Add("\n확인이 필요한 항목");
-                lines.AddRange(plan.Warnings.Select(warning => "  " + warning));
+                document.Heading("확인이 필요한 항목");
+                foreach (string warning in plan.Warnings)
+                    document.Body(warning);
             }
-            planText.Text = lines.Count == 0 ? "아이템 상세에서 목표 수량을 입력하고 저장하세요." :
-                string.Join(Environment.NewLine, lines);
+            if (plan is { Materials.Length: 0, Tools.Length: 0, Steps.Length: 0, Warnings.Length: 0 })
+                document.Body("아이템 상세에서 목표 수량을 입력하고 저장하세요.");
+            planText.Rtf = document.ToString();
+            planText.Select(0, 0);
+            planText.ScrollToCaret();
         }
         catch (OverflowException)
         {

@@ -9,7 +9,7 @@ internal enum Category { Item, Recipe, Skill, Map, Boss }
 internal sealed record Entry(
     Category Category, string Korean, string English, string Chinese, string Details, string Source,
     int? ItemId = null, RecipeBatch? Batch = null, bool InferredId = false, string ChineseAlias = "",
-    RecipeChoice[]? Recipes = null)
+    RecipeChoice[]? Recipes = null, bool VerifiedAsset = false)
 {
     public string Title => Korean.Length > 0 ? Korean : English.Length > 0 ? English : Chinese;
     public string CategoryName => Category switch
@@ -24,7 +24,7 @@ internal sealed record Entry(
     public override string ToString() => $"{CategoryName}  ·  {Title}";
 }
 
-internal sealed record Material(string Name, decimal PerBatch);
+internal sealed record Material(string Name, decimal PerBatch, int? Id = null);
 
 internal sealed record RecipeBatch(int Output, Material[] Materials, bool Partial = true)
 {
@@ -44,6 +44,17 @@ internal sealed class Catalog
     private bool manuallyLoadedLocalization;
     private string localizationLabel = "";
     private RecipeSnapshot? recipeSnapshot;
+    private Entry[]? entries;
+    private Dictionary<int, Entry>? itemIndex;
+    private SearchDocument[] searchIndex = [];
+    private sealed record SearchDocument(Entry Entry, string[] Names, string Id, string Details);
+    public string RecipeBuild => recipeSnapshot?.Build ?? "";
+
+    public Entry? Item(int id)
+    {
+        _ = Entries();
+        return itemIndex!.GetValueOrDefault(id);
+    }
     public string DataStatus
     {
         get
@@ -55,7 +66,44 @@ internal sealed class Catalog
         }
     }
 
-    private IEnumerable<Entry> Entries()
+    private Entry[] Entries()
+    {
+        if (entries is not null)
+            return entries;
+
+        var raw = SourceEntries().ToArray();
+        itemIndex = raw.Where(entry => entry.Category is Category.Item or Category.Recipe && entry.ItemId.HasValue)
+            .GroupBy(entry => entry.ItemId!.Value)
+            .ToDictionary(group => group.Key, group => MergeItem(group));
+        entries = itemIndex.Values.Concat(raw.Where(entry => entry.Category is not (Category.Item or Category.Recipe)
+            || !entry.ItemId.HasValue)).ToArray();
+        searchIndex = entries.Select(entry => new SearchDocument(entry,
+            new[] { entry.Korean, entry.English, entry.Chinese, entry.ChineseAlias }.Select(Normalize).ToArray(),
+            entry.ItemId?.ToString(CultureInfo.InvariantCulture) ?? "",
+            Normalize(string.Join("\n", new[] { entry.Details }.Concat((entry.Recipes ?? [])
+                .Select(recipe => $"{recipe.Station}\n{recipe.Details}")))))).ToArray();
+        return entries;
+    }
+
+    private static Entry MergeItem(IEnumerable<Entry> group)
+    {
+        var candidates = group.ToArray();
+        var item = candidates.Where(entry => entry.Category == Category.Item)
+            .OrderByDescending(entry => entry.VerifiedAsset)
+            .ThenByDescending(entry => entry.Korean.Length > 0)
+            .FirstOrDefault() ?? candidates[0];
+        var variants = item.Recipes ?? candidates.Where(entry => entry.Category == Category.Recipe && !item.VerifiedAsset)
+            .Select(entry => new RecipeChoice("기본 제작법", entry.Details, entry.Source, entry.Batch, "작업대 미확인"))
+            .ToArray();
+        var conflicts = candidates.Where(entry => entry.Category == Category.Item && !ReferenceEquals(entry, item) &&
+                entry.English.Length > 0 && item.English.Length > 0 && !SameEnglishName(entry, item))
+            .Select(entry => $"{entry.Title} / {entry.English} ({entry.Source})").Distinct().ToArray();
+        string details = conflicts.Length == 0 ? item.Details : item.Details +
+            "\n\n같은 ID의 다른 출처 명칭 · 제작법 연결에서 제외\n" + string.Join("\n", conflicts);
+        return item with { Category = Category.Item, Details = details, Recipes = variants };
+    }
+
+    private IEnumerable<Entry> SourceEntries()
     {
         var items = localization.ToDictionary(e => e.ItemId!.Value);
         foreach (var entry in Starter.Entries)
@@ -102,7 +150,7 @@ internal sealed class Catalog
                 var recipes = snapshot.For(asset.Id);
                 var fromAsset = new Entry(Category.Item, asset.Korean, asset.English, "",
                     "설치된 기본 게임의 아이템 자산입니다.", $"로컬 Steam 빌드 {snapshot.Build} · 아이템 자산",
-                    asset.Id, Recipes: recipes.Length > 0 ? recipes : null);
+                    asset.Id, Recipes: recipes.Length > 0 ? recipes : null, VerifiedAsset: true);
                 if (fromAsset.Title.Length == 0)
                     fromAsset = fromAsset with { Korean = $"ID {asset.Id}" };
 
@@ -111,14 +159,11 @@ internal sealed class Catalog
                 else if (SameEnglishName(item, fromAsset) ||
                     (item.English.Length == 0 || fromAsset.English.Length == 0) &&
                     item.Korean.Length > 0 && Normalize(item.Korean) == Normalize(fromAsset.Korean))
-                    items[asset.Id] = fromAsset = item with { InferredId = false, Recipes = fromAsset.Recipes,
+                    items[asset.Id] = fromAsset = item with { InferredId = false, Recipes = fromAsset.Recipes, VerifiedAsset = true,
                         Source = item.Source + " / 아이템 자산 ID 대조" };
                 else
                     yield return fromAsset;
 
-                if (recipes.Length > 0)
-                    yield return fromAsset with { Category = Category.Recipe, Source = recipes[0].Source,
-                        Details = string.Join(" ", recipes.Select(r => r.Details)) };
             }
         }
 
@@ -132,13 +177,15 @@ internal sealed class Catalog
     public IReadOnlyList<Entry> Find(string query, Category? category)
     {
         var terms = Normalize(query).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
-        var entries = Entries().Where(e => category is null || e.Category == category);
+        _ = Entries();
+        var documents = searchIndex.Where(d => category is null || d.Entry.Category == category ||
+            category == Category.Recipe && d.Entry.Category == Category.Item && d.Entry.Recipes is { Length: > 0 });
 
         if (terms.Length == 0)
-            return entries.OrderBy(e => e.Category).ThenBy(e => e.Korean.Length == 0)
+            return documents.Select(d => d.Entry).OrderBy(e => e.Category).ThenBy(e => e.Korean.Length == 0)
                 .ThenBy(e => e.Title, KoreanOrder).ToArray();
 
-        return entries.Select(e => (Entry: e, Score: Score(e, terms)))
+        return documents.Select(d => (d.Entry, Score: Score(d, terms)))
             .Where(result => result.Score > 0)
             .OrderByDescending(result => result.Score)
             .ThenBy(result => result.Entry.Title, KoreanOrder)
@@ -163,6 +210,7 @@ internal sealed class Catalog
             default:
                 throw new InvalidDataException("한국어 현지화 CSV 또는 개발사의 영문 아이템 ID 표를 선택하세요.");
         }
+        entries = null;
         return (localization.Count, official.Count);
     }
 
@@ -191,6 +239,7 @@ internal sealed class Catalog
 
         if (recipes?.Build == data.Build)
             recipeSnapshot = recipes;
+        entries = null;
         if (manuallyLoadedLocalization)
             return recipeSnapshot is not null;
 
@@ -292,15 +341,13 @@ internal sealed class Catalog
 
     private static string Normalize(string text) => text.Normalize(NormalizationForm.FormKC).ToUpperInvariant();
 
-    private static int Score(Entry entry, string[] terms)
+    private static int Score(SearchDocument document, string[] terms)
     {
-        var names = new[] { Normalize(entry.Korean), Normalize(entry.English), Normalize(entry.Chinese), Normalize(entry.ChineseAlias) };
-        string id = entry.ItemId?.ToString(CultureInfo.InvariantCulture) ?? "";
-        string details = Normalize(entry.Details);
+        var names = document.Names;
         int total = 0;
         foreach (string term in terms)
         {
-            int score = id == term ? 100 : details.Contains(term, StringComparison.Ordinal) ? 1 : 0;
+            int score = document.Id == term ? 100 : document.Details.Contains(term, StringComparison.Ordinal) ? 1 : 0;
             for (int i = 0; i < names.Length; i++)
             {
                 string name = names[i];

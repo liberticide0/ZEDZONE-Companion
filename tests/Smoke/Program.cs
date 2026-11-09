@@ -9,6 +9,7 @@ static void Check(bool condition, string scenario)
 
 var catalog = new Catalog();
 RecipeSmoke.Run(Check);
+WishlistSmoke.Run(Check);
 foreach (string query in new[] { "돌망치", "stone hammer", "石锤", "３０３" })
     Check(catalog.Find(query, Category.Item).FirstOrDefault()?.ItemId == 303, $"item search: {query}");
 
@@ -20,10 +21,10 @@ foreach (string query in new[] { "12 게이지", "12 gauge", "12号散弹", "100
         catalog.Find(query, Category.Recipe).FirstOrDefault()?.ItemId == 100,
         $"12 gauge in both item and recipe filters: {query}");
 }
-Check(catalog.Find("12 게이지", null).Count(e => e.ItemId == 100) == 2,
-    "12 gauge in the default search without imported data");
+Check(catalog.Find("12 게이지", null).Count(e => e.ItemId == 100) == 1,
+    "12 gauge has one result in the default search without imported data");
 
-var batch = catalog.Find("방사능 폭탄", Category.Recipe).Single().Batch!;
+var batch = catalog.Find("방사능 폭탄", Category.Recipe).Single().Recipes!.Single().Batch!;
 foreach (var (target, batches, output) in new[] { (1, 1, 2), (2, 1, 2), (3, 2, 4), (999, 500, 1000) })
 {
     var plan = batch.Calculate(target);
@@ -57,7 +58,8 @@ try
         "CSV quotes and multiline field");
     Check(catalog.Import(md).Official == 2 &&
         catalog.Find("示例步枪", Category.Item).Single().Title == "예제 소총", "EN/ID match adds the Chinese name");
-    Check(catalog.Find("401", Category.Item).Count == 2, "conflicting cross-build names stay separate");
+    Check(catalog.Find("401", Category.Item).Single().Details.Contains("Old item"),
+        "conflicting cross-build names are attributed in one result");
 
     File.AppendAllText(csv, "\n1000400,Duplicate,중복");
     try
@@ -102,7 +104,8 @@ try
             "Steam secondary library with build provenance");
         Check(automatic.Find("예제 부품", Category.Item).Single() is { ItemId: 444, InferredId: true },
             "Steam item is searchable with its inferred ID");
-        Check(automatic.Find("100", Category.Item).Count == 2, "built-in name conflict keeps both entries");
+        Check(automatic.Find("100", Category.Item).Single().Details.Contains("Different 12 Gauge"),
+            "built-in name conflict is attributed in one result");
         Check(!catalog.UseSteamLocalization(detected), "Steam discovery cannot overwrite a manual CSV");
 
         File.WriteAllText(installedCsv, "invalid");

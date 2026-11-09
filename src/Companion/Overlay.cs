@@ -30,6 +30,27 @@ internal sealed class Overlay : Form
     private readonly Label status = Caption("");
     private readonly Label title = Caption("", Ink);
     private readonly Label metadata = Caption("");
+    private readonly Button wishlistToggle = ActionButton("찜목록");
+    private readonly Button sizeToggle = ActionButton("작게");
+    private readonly Button saveGoal = ActionButton("목표 저장");
+    private readonly Panel side = new() { Dock = DockStyle.Fill, Margin = Padding.Empty };
+    private readonly ListBox goals = new()
+    {
+        AccessibleName = "찜목록 목표", BackColor = Surface, ForeColor = Ink,
+        Dock = DockStyle.Fill, BorderStyle = BorderStyle.None, IntegralHeight = false
+    };
+    private readonly RichTextBox planText = new()
+    {
+        AccessibleName = "찜목록 합산 제작 계획", BackColor = Surface, ForeColor = Ink,
+        Dock = DockStyle.Fill, BorderStyle = BorderStyle.None, ReadOnly = true, DetectUrls = false
+    };
+    private Control detailView = null!;
+    private Control wishlistView = null!;
+    private WishlistState wishlist = WishlistState.Empty;
+    private bool bindingRecipes;
+    private bool wishlistUnreadable;
+    private bool showingWishlist;
+    private bool compact;
     private readonly ComboBox recipeSelector = new()
     {
         AccessibleName = "제작법 선택", DropDownStyle = ComboBoxStyle.DropDownList,
@@ -66,8 +87,10 @@ internal sealed class Overlay : Form
         Font = new Font("Malgun Gothic", 10);
         StartPosition = FormStartPosition.CenterScreen;
         AutoScaleMode = AutoScaleMode.Dpi;
-        ClientSize = new Size(780, 505);
+        ClientSize = new Size(880, 570);
         MinimumSize = new Size(595, 410);
+        FormBorderStyle = FormBorderStyle.None;
+        Opacity = 0.96;
         TopMost = true;
 
         menu = new ContextMenuStrip();
@@ -80,6 +103,25 @@ internal sealed class Overlay : Form
             Native.GetWindowThreadProcessId(previous, out previousPid);
 
         BuildLayout();
+        try
+        {
+            wishlist = WishlistStore.Load(WishlistStore.PathForUser);
+        }
+        catch (Exception error) when (Catalog.IsImportError(error) || error is System.Text.Json.JsonException)
+        {
+            wishlistUnreadable = true;
+        }
+        wishlistToggle.Click += (_, _) => ToggleWishlist();
+        saveGoal.Click += (_, _) => SaveGoal();
+        goals.DoubleClick += (_, _) => OpenGoal();
+        goals.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode == Keys.Enter)
+            {
+                OpenGoal();
+                e.SuppressKeyPress = true;
+            }
+        };
         filter.SelectedIndexChanged += (_, _) => RefreshResults();
         query.TextChanged += (_, _) => RefreshResults();
         query.KeyDown += (_, e) =>
@@ -91,7 +133,18 @@ internal sealed class Overlay : Form
             }
         };
         results.SelectedIndexChanged += (_, _) => SelectEntry();
-        recipeSelector.SelectedIndexChanged += (_, _) => ShowDetails();
+        recipeSelector.SelectedIndexChanged += (_, _) =>
+        {
+            if (!bindingRecipes && recipeSelector.SelectedIndex > 0 &&
+                results.SelectedItem is Entry { ItemId: int id })
+            {
+                var preference = new RecipePreference(id, catalog.RecipeBuild, recipeSelector.SelectedIndex - 1);
+                if (!wishlist.Preferences.Contains(preference))
+                    SaveWishlist(wishlist with { Preferences = wishlist.Preferences.Where(choice => choice.Id != id)
+                        .Append(preference).ToArray() });
+            }
+            ShowDetails();
+        };
         target.TextChanged += (_, _) => ShowDetails();
         Shown += async (_, _) =>
         {
@@ -107,9 +160,11 @@ internal sealed class Overlay : Form
             detectingSteam = false;
             if (catalog.UseSteamLocalization(detected, recipes))
                 RefreshResults();
+            RefreshWishlist();
             UpdateStatus();
         };
         RefreshResults();
+        RefreshWishlist();
         UpdateStatus();
     }
 
@@ -121,12 +176,29 @@ internal sealed class Overlay : Form
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 29));
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 28));
+        root.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
         Controls.Add(root);
 
+        var header = new TableLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty, ColumnCount = 3 };
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        header.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         var heading = Caption(AppTitle, Ink);
-        heading.Font = new Font(Font.FontFamily, 19, FontStyle.Bold);
-        root.Controls.Add(heading, 0, 0);
+        heading.Dock = DockStyle.Fill;
+        heading.TextAlign = ContentAlignment.MiddleLeft;
+        heading.Font = new Font(Font.FontFamily, 17, FontStyle.Bold);
+        heading.MouseDown += (_, e) =>
+        {
+            if (e.Button == MouseButtons.Left)
+                Native.DragWindow(Handle);
+        };
+        var close = ActionButton("×");
+        close.AccessibleName = "오버레이 닫기";
+        close.Click += (_, _) => HidePanel();
+        header.Controls.Add(heading, 0, 0);
+        header.Controls.Add(wishlistToggle, 1, 0);
+        header.Controls.Add(close, 2, 0);
+        root.Controls.Add(header, 0, 0);
 
         var searchRow = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 3, RowCount = 1, Margin = Padding.Empty };
         searchRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -160,6 +232,10 @@ internal sealed class Overlay : Form
         detailPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         detailPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         title.Font = new Font(Font.FontFamily, 15, FontStyle.Bold);
+        title.AutoSize = false;
+        title.AutoEllipsis = true;
+        title.Height = 30;
+        title.Dock = DockStyle.Fill;
         metadata.ForeColor = Accent;
         metadata.Padding = new Padding(0, 0, 0, 9);
         details.Dock = DockStyle.Fill;
@@ -169,15 +245,193 @@ internal sealed class Overlay : Form
         detailPanel.Controls.Add(details, 0, 3);
         calculation.Controls.Add(Caption("목표 수량"));
         calculation.Controls.Add(target);
+        calculation.Controls.Add(saveGoal);
         detailPanel.Controls.Add(calculation, 0, 4);
-        panes.Controls.Add(detailPanel, 1, 0);
+        detailView = detailPanel;
+        wishlistView = BuildWishlist();
+        side.Controls.Add(detailView);
+        side.Controls.Add(wishlistView);
+        wishlistView.Hide();
+        panes.Controls.Add(side, 1, 0);
         root.Controls.Add(panes, 0, 3);
-        root.Controls.Add(status, 0, 4);
+        var footer = new TableLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty, ColumnCount = 2 };
+        footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        status.AutoSize = false;
+        status.Dock = DockStyle.Fill;
+        status.TextAlign = ContentAlignment.MiddleLeft;
+        status.AutoEllipsis = true;
+        footer.Controls.Add(status, 0, 0);
+        sizeToggle.AccessibleName = "창 크기 전환";
+        sizeToggle.Margin = new Padding(3, 0, 0, 0);
+        sizeToggle.Click += (_, _) => ToggleSize();
+        footer.Controls.Add(sizeToggle, 1, 0);
+        root.Controls.Add(footer, 0, 4);
     }
 
     private static Label Caption(string text, Color? color = null) =>
         new() { Text = text, ForeColor = color ?? Muted, AutoSize = true, Anchor = AnchorStyles.Left };
 
+    private static Button ActionButton(string text)
+    {
+        var button = new Button { Text = text, AutoSize = true, FlatStyle = FlatStyle.Flat,
+            BackColor = Surface, ForeColor = Ink, Anchor = AnchorStyles.Left };
+        button.FlatAppearance.BorderColor = Color.FromArgb(70, 94, 80);
+        return button;
+    }
+
+    private void ToggleSize()
+    {
+        compact = !compact;
+        var area = Screen.FromControl(this).WorkingArea;
+        int width = Math.Min(LogicalToDeviceUnits(compact ? 650 : 880), area.Width);
+        int height = Math.Min(LogicalToDeviceUnits(compact ? 460 : 570), area.Height);
+        Size = new Size(width, height);
+        Location = new Point(Math.Clamp(Left, area.Left, Math.Max(area.Left, area.Right - Width)),
+            Math.Clamp(Top, area.Top, Math.Max(area.Top, area.Bottom - Height)));
+        sizeToggle.Text = compact ? "크게" : "작게";
+    }
+
+    private Control BuildWishlist()
+    {
+        var view = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill, Padding = new Padding(13), BackColor = Surface, ColumnCount = 1, RowCount = 4
+        };
+        view.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        view.RowStyles.Add(new RowStyle(SizeType.Percent, 32));
+        view.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        view.RowStyles.Add(new RowStyle(SizeType.Percent, 68));
+        view.Controls.Add(Caption("제작 목표", Accent), 0, 0);
+        view.Controls.Add(goals, 0, 1);
+        var actions = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill };
+        var edit = ActionButton("상세 열기");
+        var remove = ActionButton("목표 제거");
+        edit.Click += (_, _) => OpenGoal();
+        remove.Click += (_, _) =>
+        {
+            if (goals.SelectedItem is GoalRow row)
+                SaveWishlist(wishlist with { Goals = wishlist.Goals.Where(goal => goal.Id != row.Goal.Id).ToArray() });
+        };
+        actions.Controls.Add(edit);
+        actions.Controls.Add(remove);
+        view.Controls.Add(actions, 0, 2);
+        view.Controls.Add(planText, 0, 3);
+        return view;
+    }
+
+    private sealed record GoalRow(CraftGoal Goal)
+    {
+        public override string ToString() => $"{Goal.Name}  × {Goal.Quantity:N0}";
+    }
+
+    private void ToggleWishlist()
+    {
+        showingWishlist = !showingWishlist;
+        detailView.Visible = !showingWishlist;
+        wishlistView.Visible = showingWishlist;
+        if (showingWishlist)
+        {
+            wishlistView.BringToFront();
+            RefreshWishlist();
+            goals.Focus();
+        }
+        else
+        {
+            detailView.BringToFront();
+            RefreshWishlist();
+            FocusSearch();
+        }
+    }
+
+    private void OpenGoal()
+    {
+        if (goals.SelectedItem is not GoalRow row)
+            return;
+        filter.SelectedIndex = 1;
+        query.Text = row.Goal.Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        if (showingWishlist)
+            ToggleWishlist();
+    }
+
+    private void SaveGoal()
+    {
+        if (results.SelectedItem is not Entry { Category: Category.Item, ItemId: int id } entry ||
+            !int.TryParse(target.Text, out int amount) || amount is < 1 or > 999)
+            return;
+
+        if (SaveWishlist(wishlist with { Goals = wishlist.Goals.Where(goal => goal.Id != id)
+            .Append(new CraftGoal(id, entry.Title, amount)).ToArray() }))
+            saveGoal.Text = "저장됨";
+    }
+
+    private bool SaveWishlist(WishlistState candidate)
+    {
+        if (wishlistUnreadable)
+        {
+            status.Text = "찜목록을 읽을 수 없어 기존 파일을 보존했습니다.";
+            return false;
+        }
+        try
+        {
+            WishlistStore.Save(WishlistStore.PathForUser, candidate);
+            wishlist = candidate;
+            RefreshWishlist();
+            return true;
+        }
+        catch (Exception error) when (Catalog.IsImportError(error))
+        {
+            status.Text = "찜목록 저장 실패 · 기존 목표를 유지합니다.";
+            return false;
+        }
+    }
+
+    private void RefreshWishlist()
+    {
+        wishlistToggle.Text = showingWishlist ? $"상세로 · 목표 {wishlist.Goals.Length}" : $"찜목록 {wishlist.Goals.Length}";
+        if (!showingWishlist)
+            return;
+        int? selected = (goals.SelectedItem as GoalRow)?.Goal.Id;
+        goals.Items.Clear();
+        goals.Items.AddRange(wishlist.Goals.Select(goal => (object)new GoalRow(goal)).ToArray());
+        if (goals.Items.Count > 0)
+        {
+            int index = Array.FindIndex(wishlist.Goals, goal => goal.Id == selected);
+            goals.SelectedIndex = Math.Max(0, index);
+        }
+
+        try
+        {
+            var plan = CraftPlanner.Calculate(wishlist, catalog.RecipeBuild, catalog.Item);
+            var lines = new List<string>();
+            if (plan.Materials.Length > 0)
+            {
+                lines.Add("직접 확보할 재료");
+                lines.AddRange(plan.Materials.Select(m => $"  {m.Name}  × {m.Quantity:0.######}"));
+            }
+            if (plan.Tools.Length > 0)
+            {
+                lines.Add("\n필요 도구");
+                lines.AddRange(plan.Tools.Select(m => $"  {m.Name}  × {m.Quantity:0.######}"));
+            }
+            if (plan.Steps.Length > 0)
+            {
+                lines.Add("\n제작 순서");
+                lines.AddRange(plan.Steps.Select(s => $"  {s.Name} · {s.Station} · {s.Batches:N0}회 → {s.Output:N0}개"));
+            }
+            if (plan.Warnings.Length > 0)
+            {
+                lines.Add("\n확인이 필요한 항목");
+                lines.AddRange(plan.Warnings.Select(warning => "  " + warning));
+            }
+            planText.Text = lines.Count == 0 ? "아이템 상세에서 목표 수량을 입력하고 저장하세요." :
+                string.Join(Environment.NewLine, lines);
+        }
+        catch (OverflowException)
+        {
+            planText.Text = "필요 재료 수가 계산 범위를 넘습니다. 목표 수량을 줄여 주세요.";
+        }
+    }
     private void DrawResult(object? sender, DrawItemEventArgs e)
     {
         if (e.Index < 0 || results.Items[e.Index] is not Entry entry)
@@ -212,24 +466,39 @@ internal sealed class Overlay : Form
 
     private void SelectEntry()
     {
-        recipeSelector.Items.Clear();
-        if (results.SelectedItem is Entry { Recipes: { Length: > 0 } choices } entry)
+        bindingRecipes = true;
+        try
         {
-            if (entry.Category == Category.Item)
+            recipeSelector.Items.Clear();
+            int? id = (results.SelectedItem as Entry)?.ItemId;
+            target.Value = wishlist.Goals.FirstOrDefault(goal => goal.Id == id)?.Quantity ?? 1;
+            saveGoal.Text = wishlist.Goals.Any(goal => goal.Id == id) ? "목표 수정" : "목표 저장";
+            if (results.SelectedItem is Entry { Recipes: { Length: > 0 } choices } entry)
+            {
                 recipeSelector.Items.Add("아이템 설명");
-            recipeSelector.Items.AddRange(choices.Select(choice => (object)choice.Label).ToArray());
-            recipeSelector.SelectedIndex = 0;
-            recipeSelector.Visible = true;
+                recipeSelector.Items.AddRange(choices.Select(choice => (object)choice.Label).ToArray());
+                int index = CraftPlanner.ChoiceIndex(entry, catalog.RecipeBuild, wishlist.Preferences);
+                recipeSelector.SelectedIndex = filter.SelectedIndex == 2 ||
+                    wishlist.Preferences.Any(choice => choice.Id == id && choice.Build == catalog.RecipeBuild)
+                    ? index + 1 : 0;
+                recipeSelector.Visible = true;
+            }
+            else
+            {
+                recipeSelector.Visible = false;
+            }
         }
-        else
+        finally
         {
-            recipeSelector.Visible = false;
+            bindingRecipes = false;
         }
         ShowDetails();
     }
 
     private void ShowDetails()
     {
+        if (bindingRecipes)
+            return;
         if (results.SelectedItem is not Entry entry)
         {
             calculation.Visible = false;
@@ -239,11 +508,13 @@ internal sealed class Overlay : Form
             return;
         }
 
-        int choiceIndex = recipeSelector.SelectedIndex - (entry.Category == Category.Item ? 1 : 0);
+        int choiceIndex = recipeSelector.SelectedIndex - 1;
         var choice = entry.Recipes is { } choices && choiceIndex >= 0 && choiceIndex < choices.Length
             ? choices[choiceIndex] : null;
         var batch = choice is null ? entry.Batch : choice.Batch;
-        calculation.Visible = batch is not null;
+        bool canSaveGoal = entry.Category == Category.Item && entry.ItemId.HasValue;
+        calculation.Visible = canSaveGoal || batch is not null;
+        saveGoal.Visible = canSaveGoal;
         title.Text = entry.Title;
         metadata.Text = entry.ItemId is int id
             ? $"{entry.CategoryName}   /   {(entry.InferredId ? "추정 ID" : "ID")} {id}"
@@ -266,7 +537,9 @@ internal sealed class Overlay : Form
             }
         }
         details.Text = (aliases.Length == 0 ? "" : $"{aliases}\n\n") +
-            $"{estimate}{choice?.Details ?? entry.Details}\n\n출처  {choice?.Source ?? entry.Source}";
+            (choice is null
+                ? $"{entry.Details}\n\n출처  {entry.Source}"
+                : $"{estimate}{choice.Details}\n\n제작법 출처  {choice.Source}\n\n아이템 정보\n{entry.Details}\n\n출처  {entry.Source}");
         details.Select(0, 0);
         details.ScrollToCaret();
     }
@@ -286,6 +559,7 @@ internal sealed class Overlay : Form
 
             catalog.Import(dialog.FileName);
             RefreshResults();
+            RefreshWishlist();
             UpdateStatus();
         }
         catch (Exception error) when (Catalog.IsImportError(error))
@@ -362,6 +636,21 @@ internal sealed class Overlay : Form
             recipeSelector.Focus();
             return true;
         }
+        if (keyData == (Keys.Control | Keys.L))
+        {
+            ToggleWishlist();
+            return true;
+        }
+        if (keyData == (Keys.Control | Keys.D) && !showingWishlist)
+        {
+            SaveGoal();
+            return true;
+        }
+        if (keyData == (Keys.Control | Keys.OemMinus))
+        {
+            ToggleSize();
+            return true;
+        }
         return base.ProcessCmdKey(ref msg, keyData);
     }
 
@@ -387,7 +676,8 @@ internal sealed class Overlay : Form
     {
         string key = hotkeyId == 0 ? "단축키 충돌 · 알림 영역에서 열기" : shortcut;
         string data = detectingSteam ? "Steam 자료 확인 중" : catalog.DataStatus;
-        status.Text = $"{key}   ·   Esc 닫기   ·   {data}";
+        status.Text = wishlistUnreadable ? "찜목록 파일 읽기 실패 · 기존 파일을 보존합니다." :
+            $"{key}   ·   Esc 닫기   ·   {data}";
     }
 
     private void OpenPanel()
@@ -406,8 +696,11 @@ internal sealed class Overlay : Form
             if (!Visible)
             {
                 var area = Screen.FromHandle(previous).WorkingArea;
-                Location = new Point(area.Left + Math.Max(0, (area.Width - Width) / 2),
-                    area.Top + Math.Max(0, (area.Height - Height) / 2));
+                if (Width > area.Width || Height > area.Height)
+                    Size = new Size(Math.Min(Width, area.Width), Math.Min(Height, area.Height));
+                if (!area.Contains(Bounds))
+                    Location = new Point(area.Left + Math.Max(0, (area.Width - Width) / 2),
+                        area.Top + Math.Max(0, (area.Height - Height) / 2));
             }
         }
         Show();

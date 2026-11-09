@@ -10,5 +10,6 @@
     <Compile Include="../../src/Companion/Starter.cs" Link="Starter.cs" />
     <Compile Include="../../src/Companion/SteamInstall.cs" Link="SteamInstall.cs" />
     <Compile Include="../../src/Companion/RecipeSnapshot.cs" Link="RecipeSnapshot.cs" />
+    <Compile Include="../../src/Companion/Wishlist.cs" Link="Wishlist.cs" />
   </ItemGroup>
 </Project>

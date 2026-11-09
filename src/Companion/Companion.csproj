@@ -6,7 +6,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>ZEDZONE.Companion</AssemblyName>
-    <Version>0.3.0</Version>
+    <Version>0.4.0</Version>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>

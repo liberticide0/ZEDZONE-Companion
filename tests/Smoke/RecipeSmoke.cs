@@ -30,6 +30,8 @@ internal static class RecipeSmoke
         var recipe = catalog.Find("예제 탄약", Category.Recipe).Single();
         check(item is { InferredId: false, Recipes.Length: 3 } && ReferenceEquals(item.Recipes, recipe.Recipes),
             "item and recipe filters expose the same three variants with a confirmed ID");
+        check(ReferenceEquals(item, catalog.Find("탄약 압착기", Category.Recipe).Single(entry => entry.ItemId == 1)),
+            "station keyword is indexed against the same item result");
         var hand = recipe.Recipes![0].Batch!;
         var handPlan = hand.Calculate(4);
         check(hand.Partial && handPlan.Output == 6 && handPlan.Materials.Single().PerBatch == 2.5m,
@@ -46,13 +48,15 @@ internal static class RecipeSmoke
 
         var conflicting = new Catalog();
         conflicting.UseSteamLocalization(([local[0] with { English = "Different English Name" }], "42"), snapshot);
-        check(conflicting.Find("예제 탄약", Category.Item).Count == 2 &&
-            conflicting.Find("Different English Name", Category.Item).Single().Recipes is null,
-            "same ID with conflicting names is not bound to the wrong item");
+        var unified = conflicting.Find("예제 탄약", null).Single();
+        check(unified is { English: "Example Ammo", Recipes.Length: 3 } &&
+            ReferenceEquals(unified, conflicting.Find("Different English Name", Category.Item).Single()) &&
+            unified.Details.Contains("제작법 연결에서 제외"),
+            "conflicting names remain attributed on one confirmed item row");
 
         var stale = new Catalog();
         stale.UseSteamLocalization((local, "43"), snapshot);
-        check(stale.Find("예제 탄약", Category.Item).Single().Recipes is null, "different Steam build ignores the cache");
+        check(stale.Find("예제 탄약", Category.Item).Single().Recipes is { Length: 0 }, "different Steam build ignores the cache");
         CheckRejected(fixture, "43", check, "snapshot header build mismatch is rejected");
         CheckRejected(fixture.Replace("\"id\":2,\"quantity\":2", "\"id\":999,\"quantity\":2"),
             "42", check, "missing ingredient ID is rejected");

@@ -19,7 +19,8 @@ internal sealed record LocalRecipe([property: JsonRequired] int OutputId, int Ou
 internal sealed record ResearchUnlock(string Name, bool Default, string[] Prerequisites);
 internal sealed record RecipeAsset([property: JsonRequired] int Id, string Korean, string English,
     [property: JsonRequired] bool DefaultUnlock, LocalRecipe[] Recipes, ResearchUnlock[]? Research = null);
-internal sealed record RecipeChoice(string Label, string Details, string Source, RecipeBatch? Batch);
+internal sealed record RecipeChoice(string Label, string Details, string Source, RecipeBatch? Batch,
+    string Station, Material[]? Tools = null);
 
 internal sealed class RecipeSnapshot
 {
@@ -121,7 +122,7 @@ internal sealed class RecipeSnapshot
 
         var inputs = recipe.Materials.Where(material => material.Quantity > 0)
             .GroupBy(material => material.Id)
-            .Select(group => new Material(Name(group.Key), group.Sum(material => material.Quantity))).ToArray();
+            .Select(group => new Material(Name(group.Key), group.Sum(material => material.Quantity), group.Key)).ToArray();
         var tools = recipe.Materials.Where(verifiedMultitool).ToArray();
         var unknown = recipe.Materials.Where(material => material.Quantity < 0 && !verifiedMultitool(material)).ToArray();
         var lines = new List<string> { $"작업대  {recipe.Station}", $"회당 생산  {recipe.Output:N0}개" };
@@ -156,6 +157,7 @@ internal sealed class RecipeSnapshot
             ? new RecipeBatch(recipe.Output, inputs, Partial: unknown.Length > 0 || recipe.ToolType != 0)
             : null;
         return new RecipeChoice($"{number}. {recipe.Station}", string.Join("\n", lines),
-            $"로컬 Steam 빌드 {Build} · 아이템 자산의 정적 제작법", batch);
+            $"로컬 Steam 빌드 {Build} · 아이템 자산의 정적 제작법", batch, recipe.Station,
+            tools.Select(tool => new Material(Name(tool.Id), -tool.Quantity, tool.Id)).ToArray());
     }
 }

@@ -35,10 +35,10 @@ internal static class Starter
             "제작 방식  손 제작\n재료·수량·추가 조건  미검증\n\n개발사 문서의 손 제작 예시입니다. 정확한 요구 조건은 게임 제작 화면에서 확인하세요.", ModDocs, 303),
         new(Category.Recipe, "60mm 고폭 유탄", "60mm HE Grenade", "60毫米高爆榴弹",
             "작업대  탄약 압착기\n해금  60mm 고폭 유탄 장전 매뉴얼 읽기\n재료·수량  미검증",
-            LocalText + " · 장전 매뉴얼 안내"),
+            LocalText + " · 장전 매뉴얼 안내", 123),
         new(Category.Recipe, "84mm 고폭탄", "84mm HE Round", "84毫米高爆弹",
             "작업대  탄약 압착기\n해금  84mm 고폭탄 장전 매뉴얼 읽기\n재료·수량  미검증",
-            LocalText + " · 장전 매뉴얼 안내"),
+            LocalText + " · 장전 매뉴얼 안내", 122),
         new(Category.Recipe, "방사능 폭탄", "Radiation Bomb", "辐射炸弹",
             "작업대  간이 작업대, 작업대 또는 고급 작업대\n배치당 생산  2개\n\n" +
             "연료봉 외에 화약, 용기, 기폭 장치가 필요합니다. 그 수량과 해금 조건은 미검증입니다.",

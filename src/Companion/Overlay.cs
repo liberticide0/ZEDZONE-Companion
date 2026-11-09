@@ -30,6 +30,11 @@ internal sealed class Overlay : Form
     private readonly Label status = Caption("");
     private readonly Label title = Caption("", Ink);
     private readonly Label metadata = Caption("");
+    private readonly ComboBox recipeSelector = new()
+    {
+        AccessibleName = "제작법 선택", DropDownStyle = ComboBoxStyle.DropDownList,
+        Dock = DockStyle.Fill, BackColor = Surface, ForeColor = Ink, Visible = false
+    };
     private readonly FlowLayoutPanel calculation = new() { Dock = DockStyle.Fill, AutoSize = true };
     private readonly NumericUpDown target = new()
     {
@@ -85,17 +90,22 @@ internal sealed class Overlay : Form
                 e.SuppressKeyPress = true;
             }
         };
-        results.SelectedIndexChanged += (_, _) => ShowDetails();
+        results.SelectedIndexChanged += (_, _) => SelectEntry();
+        recipeSelector.SelectedIndexChanged += (_, _) => ShowDetails();
         target.TextChanged += (_, _) => ShowDetails();
         Shown += async (_, _) =>
         {
             FocusSearch();
-            var detected = await Task.Run(() => Catalog.ReadSteamLocalization(SteamInstall.LocalRoots()));
+            var (detected, recipes) = await Task.Run(() =>
+            {
+                var localization = Catalog.ReadSteamLocalization(SteamInstall.LocalRoots());
+                return (localization, localization is { } data ? RecipeSnapshot.ReadInstalled(data.Build) : null);
+            });
             if (IsDisposed || Disposing)
                 return;
 
             detectingSteam = false;
-            if (catalog.UseSteamLocalization(detected))
+            if (catalog.UseSteamLocalization(detected, recipes))
                 RefreshResults();
             UpdateStatus();
         };
@@ -143,7 +153,8 @@ internal sealed class Overlay : Form
         results.ItemHeight = Font.Height + 14;
         results.DrawItem += DrawResult;
         panes.Controls.Add(results, 0, 0);
-        var detailPanel = new TableLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty, Padding = new Padding(13), BackColor = Surface, ColumnCount = 1, RowCount = 4 };
+        var detailPanel = new TableLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty, Padding = new Padding(13), BackColor = Surface, ColumnCount = 1, RowCount = 5 };
+        detailPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         detailPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         detailPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         detailPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
@@ -154,10 +165,11 @@ internal sealed class Overlay : Form
         details.Dock = DockStyle.Fill;
         detailPanel.Controls.Add(title, 0, 0);
         detailPanel.Controls.Add(metadata, 0, 1);
-        detailPanel.Controls.Add(details, 0, 2);
+        detailPanel.Controls.Add(recipeSelector, 0, 2);
+        detailPanel.Controls.Add(details, 0, 3);
         calculation.Controls.Add(Caption("목표 수량"));
         calculation.Controls.Add(target);
-        detailPanel.Controls.Add(calculation, 0, 3);
+        detailPanel.Controls.Add(calculation, 0, 4);
         panes.Controls.Add(detailPanel, 1, 0);
         root.Controls.Add(panes, 0, 3);
         root.Controls.Add(status, 0, 4);
@@ -195,20 +207,43 @@ internal sealed class Overlay : Form
             results.EndUpdate();
         }
         count.Text = $"{found.Count:N0}개 결과";
+        SelectEntry();
+    }
+
+    private void SelectEntry()
+    {
+        recipeSelector.Items.Clear();
+        if (results.SelectedItem is Entry { Recipes: { Length: > 0 } choices } entry)
+        {
+            if (entry.Category == Category.Item)
+                recipeSelector.Items.Add("아이템 설명");
+            recipeSelector.Items.AddRange(choices.Select(choice => (object)choice.Label).ToArray());
+            recipeSelector.SelectedIndex = 0;
+            recipeSelector.Visible = true;
+        }
+        else
+        {
+            recipeSelector.Visible = false;
+        }
         ShowDetails();
     }
 
     private void ShowDetails()
     {
-        calculation.Visible = results.SelectedItem is Entry { Batch: not null };
         if (results.SelectedItem is not Entry entry)
         {
+            calculation.Visible = false;
             title.Text = "검색 결과 없음";
             metadata.Text = "";
             details.Text = "검색어를 줄이거나 분류를 전체로 바꿔 보세요.";
             return;
         }
 
+        int choiceIndex = recipeSelector.SelectedIndex - (entry.Category == Category.Item ? 1 : 0);
+        var choice = entry.Recipes is { } choices && choiceIndex >= 0 && choiceIndex < choices.Length
+            ? choices[choiceIndex] : null;
+        var batch = choice is null ? entry.Batch : choice.Batch;
+        calculation.Visible = batch is not null;
         title.Text = entry.Title;
         metadata.Text = entry.ItemId is int id
             ? $"{entry.CategoryName}   /   {(entry.InferredId ? "추정 ID" : "ID")} {id}"
@@ -216,13 +251,14 @@ internal sealed class Overlay : Form
         string aliases = string.Join("  ·  ", new[] { entry.English, entry.Chinese, entry.ChineseAlias }
             .Where(name => name.Length > 0).Distinct());
         string estimate = "";
-        if (entry.Batch is { } batch)
+        if (batch is not null)
         {
             if (int.TryParse(target.Text, out int desired) && desired >= target.Minimum && desired <= target.Maximum)
             {
                 var plan = batch.Calculate(desired);
-                string materials = string.Join(", ", plan.Materials.Select(m => $"{m.Name} {m.PerBatch}개"));
-                estimate = $"부분 계산  {plan.Batches}회 제작 → {plan.Output}개 생산\n확인된 재료  {materials}\n\n";
+                string materials = string.Join(", ", plan.Materials.Select(m => $"{m.Name} {m.PerBatch:0.######}개"));
+                string label = batch.Partial ? "부분 계산" : "목표 계산";
+                estimate = $"{label}  {plan.Batches}회 제작 → {plan.Output}개 생산\n확인된 재료  {materials}\n\n";
             }
             else
             {
@@ -230,7 +266,7 @@ internal sealed class Overlay : Form
             }
         }
         details.Text = (aliases.Length == 0 ? "" : $"{aliases}\n\n") +
-            $"{estimate}{entry.Details}\n\n출처  {entry.Source}";
+            $"{estimate}{choice?.Details ?? entry.Details}\n\n출처  {choice?.Source ?? entry.Source}";
         details.Select(0, 0);
         details.ScrollToCaret();
     }
@@ -306,7 +342,7 @@ internal sealed class Overlay : Form
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
-        if (keyData == Keys.Escape && !filter.DroppedDown)
+        if (keyData == Keys.Escape && !filter.DroppedDown && !recipeSelector.DroppedDown)
         {
             HidePanel();
             return true;
@@ -319,6 +355,11 @@ internal sealed class Overlay : Form
         if (keyData == (Keys.Control | Keys.O))
         {
             Import();
+            return true;
+        }
+        if (keyData == (Keys.Control | Keys.R) && recipeSelector.Visible)
+        {
+            recipeSelector.Focus();
             return true;
         }
         return base.ProcessCmdKey(ref msg, keyData);

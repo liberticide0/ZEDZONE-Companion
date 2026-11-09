@@ -8,7 +8,8 @@ internal enum Category { Item, Recipe, Skill, Map, Boss }
 
 internal sealed record Entry(
     Category Category, string Korean, string English, string Chinese, string Details, string Source,
-    int? ItemId = null, RecipeBatch? Batch = null, bool InferredId = false, string ChineseAlias = "")
+    int? ItemId = null, RecipeBatch? Batch = null, bool InferredId = false, string ChineseAlias = "",
+    RecipeChoice[]? Recipes = null)
 {
     public string Title => Korean.Length > 0 ? Korean : English.Length > 0 ? English : Chinese;
     public string CategoryName => Category switch
@@ -23,9 +24,9 @@ internal sealed record Entry(
     public override string ToString() => $"{CategoryName}  ·  {Title}";
 }
 
-internal sealed record Material(string Name, int PerBatch);
+internal sealed record Material(string Name, decimal PerBatch);
 
-internal sealed record RecipeBatch(int Output, Material[] Materials)
+internal sealed record RecipeBatch(int Output, Material[] Materials, bool Partial = true)
 {
     public (int Batches, int Output, Material[] Materials) Calculate(int target)
     {
@@ -42,12 +43,15 @@ internal sealed class Catalog
     private List<Entry> official = [];
     private bool manuallyLoadedLocalization;
     private string localizationLabel = "";
+    private RecipeSnapshot? recipeSnapshot;
     public string DataStatus
     {
         get
         {
             string status = localization.Count == 0 ? "기본 자료" : $"{localizationLabel} 후보 {localization.Count:N0}";
-            return official.Count == 0 ? status : $"{status} · 공식 ID {official.Count:N0}";
+            if (official.Count > 0)
+                status += $" · 공식 ID {official.Count:N0}";
+            return recipeSnapshot is null ? status : $"{status} · 제작법 {recipeSnapshot.VariantCount:N0}";
         }
     }
 
@@ -56,6 +60,10 @@ internal sealed class Catalog
         var items = localization.ToDictionary(e => e.ItemId!.Value);
         foreach (var entry in Starter.Entries)
         {
+            if (entry.Category == Category.Recipe && entry.ItemId is int recipeId &&
+                recipeSnapshot?.For(recipeId).Length > 0)
+                continue;
+
             if (entry.Category == Category.Item && entry.ItemId is int id &&
                 items.TryGetValue(id, out var item) && SameEnglishName(entry, item))
             {
@@ -79,6 +87,39 @@ internal sealed class Catalog
             }
             // A shared ID alone does not establish that names from two builds describe the same item.
             yield return reference;
+        }
+
+        if (recipeSnapshot is { } snapshot)
+        {
+            foreach (var guide in snapshot.Guides)
+            {
+                if (!Starter.Entries.Any(entry => entry.Category == guide.Category && SameEnglishName(entry, guide)))
+                    yield return guide;
+            }
+
+            foreach (var asset in snapshot.Items)
+            {
+                var recipes = snapshot.For(asset.Id);
+                var fromAsset = new Entry(Category.Item, asset.Korean, asset.English, "",
+                    "설치된 기본 게임의 아이템 자산입니다.", $"로컬 Steam 빌드 {snapshot.Build} · 아이템 자산",
+                    asset.Id, Recipes: recipes.Length > 0 ? recipes : null);
+                if (fromAsset.Title.Length == 0)
+                    fromAsset = fromAsset with { Korean = $"ID {asset.Id}" };
+
+                if (!items.TryGetValue(asset.Id, out var item))
+                    items.Add(asset.Id, fromAsset);
+                else if (SameEnglishName(item, fromAsset) ||
+                    (item.English.Length == 0 || fromAsset.English.Length == 0) &&
+                    item.Korean.Length > 0 && Normalize(item.Korean) == Normalize(fromAsset.Korean))
+                    items[asset.Id] = fromAsset = item with { InferredId = false, Recipes = fromAsset.Recipes,
+                        Source = item.Source + " / 아이템 자산 ID 대조" };
+                else
+                    yield return fromAsset;
+
+                if (recipes.Length > 0)
+                    yield return fromAsset with { Category = Category.Recipe, Source = recipes[0].Source,
+                        Details = string.Join(" ", recipes.Select(r => r.Details)) };
+            }
         }
 
         foreach (var item in items.Values)
@@ -143,10 +184,15 @@ internal sealed class Catalog
         return null;
     }
 
-    internal bool UseSteamLocalization((List<Entry> Entries, string Build)? detected)
+    internal bool UseSteamLocalization((List<Entry> Entries, string Build)? detected, RecipeSnapshot? recipes = null)
     {
-        if (manuallyLoadedLocalization || detected is not { } data)
+        if (detected is not { } data)
             return false;
+
+        if (recipes?.Build == data.Build)
+            recipeSnapshot = recipes;
+        if (manuallyLoadedLocalization)
+            return recipeSnapshot is not null;
 
         localization = data.Entries;
         localizationLabel = data.Build.Length == 0 ? "Steam 현지화" : $"Steam {data.Build}";

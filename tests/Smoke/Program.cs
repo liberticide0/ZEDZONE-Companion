@@ -8,6 +8,7 @@ static void Check(bool condition, string scenario)
 }
 
 var catalog = new Catalog();
+RecipeSmoke.Run(Check);
 foreach (string query in new[] { "돌망치", "stone hammer", "石锤", "３０３" })
     Check(catalog.Find(query, Category.Item).FirstOrDefault()?.ItemId == 303, $"item search: {query}");
 

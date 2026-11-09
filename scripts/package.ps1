@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 Push-Location (Split-Path -Parent $PSScriptRoot)
 try {
     $runtime = '8.0.33'
-    $version = '0.2.0'
+    $version = '0.3.0'
     $staging = Join-Path (Get-Location) 'artifacts/staging'
     dotnet publish src/Companion -c Release -r win-x64 --self-contained true `
         "-p:RuntimeFrameworkVersion=$runtime" -p:PublishSingleFile=true `
@@ -25,9 +25,9 @@ try {
         }
     }
 
-    Copy-Item -LiteralPath README.md, LICENSE -Destination $staging
+    Copy-Item -LiteralPath README.md, LICENSE, scripts/probe-recipes.py -Destination $staging
     $zip = Join-Path (Get-Location) "artifacts/ZEDZONE-Companion-$version-win-x64.zip"
-    $contents = 'ZEDZONE.Companion.exe', 'README.md', 'LICENSE', 'dotnet-notices' |
+    $contents = 'ZEDZONE.Companion.exe', 'README.md', 'LICENSE', 'probe-recipes.py', 'dotnet-notices' |
         ForEach-Object { Join-Path $staging $_ }
     Compress-Archive -LiteralPath $contents -DestinationPath $zip -Force
     $hash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()

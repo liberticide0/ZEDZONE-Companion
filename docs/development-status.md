@@ -62,3 +62,9 @@
 - 업데이트 확인, 진행, 오류, 제작법 준비 중 안내를 Companion 창 안에서 표시한다. 팝업에서 Esc로 취소한 뒤 오버레이와 기존 입력 위치를 유지한다.
 - 일반 사용 ZIP은 `artifacts/ZEDZONE-Companion-0.4.8-win-x64.zip`이다. SHA-256은 `413511533a49250733bfe7fa6873e42e0db07d759f18932614cc25ac320b031b`이다.
 - `artifacts/update-popup-fixtures`의 검증용 v0.4.8 → v0.4.9 쌍으로 승인, 중단, 다시 시도, 동일 경로 재실행과 자료 보존을 확인했다. 검증용 두 파일과 일반 사용 ZIP은 원격에 게시하지 않았다. [QA 기록](qa.md) · [직접 시험 절차](update-popup-test.md)
+
+## 2026-11-10 · v0.4.8 공개 배포
+
+- 로컬 개발 이력은 비공개 Git 이메일을 제거한 공개 커밋으로 정리해 PR #6에서 `main`에 병합했다. 이전 로컬 검증본의 해시와 공개 배포본의 해시는 빌드 커밋이 다르므로 구분한다. [병합된 PR](https://github.com/liberticide0/ZEDZONE-Companion/pull/6)
+- 공개 정식 릴리스 `v0.4.8`에 Windows x64 포터블 ZIP과 SHA-256 파일을 게시했다. 태그와 ZIP 내 실행 파일은 커밋 `17f71e3`에 대응한다. [공개 릴리스](https://github.com/liberticide0/ZEDZONE-Companion/releases/tag/v0.4.8)
+- 로그인 없이 v0.4.6 기준의 앱 업데이트 조회 코드가 정식 릴리스에서 v0.4.8을 찾아 ZIP을 받았다. 압축 해제와 실행 파일의 제품 버전을 확인했다. 공개 ZIP SHA-256은 `540680bb8242800c0d8c1a05df5c30f74993eda640d288de33494c98f4bcae3f`이다.

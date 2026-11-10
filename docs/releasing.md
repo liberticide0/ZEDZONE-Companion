@@ -8,4 +8,6 @@
 
 업데이트는 지정된 공개 저장소의 정식 릴리스 응답과 HTTPS 다운로드를 신뢰한다. 앱은 그 응답의 SHA-256으로 전송된 파일을 검증한다. 작업 중에는 설치 폴더의 배포 구성만 교체하며, 실행 파일을 마지막에 바꿔 중단된 교체를 복구할 수 있도록 한다.
 
+팝업을 직접 검증할 때는 `./scripts/package.ps1 -FixtureVersion X.Y.Z`로 시작·대상 ZIP을 만든다. 이 빌드에는 루프백 피드와 검증용 데이터 경로가 컴파일되며 `artifacts/update-popup-fixtures`에 저장된다. 정식 배포 ZIP은 옵션 없이 빌드한다. [팝업 실행 절차](update-popup-test.md)
+
 [GitHub 정식 릴리스 API](https://docs.github.com/en/rest/releases/releases#get-the-latest-release)

@@ -12,6 +12,7 @@
     <Compile Include="../../src/Companion/RecipeSnapshot.cs" Link="RecipeSnapshot.cs" />
     <Compile Include="../../src/Companion/Wishlist.cs" Link="Wishlist.cs" />
     <Compile Include="../../src/Companion/UpdateRelease.cs" Link="UpdateRelease.cs" />
+    <Compile Include="../../src/Companion/UpdateFixture.cs" Link="UpdateFixture.cs" />
     <Compile Include="../../src/Companion/UpdatePackage.cs" Link="UpdatePackage.cs" />
   </ItemGroup>
 </Project>

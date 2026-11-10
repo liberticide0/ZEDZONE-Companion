@@ -19,6 +19,9 @@ internal static class RecipePreparation
             FileName = PythonPath, WorkingDirectory = DirectoryPath, UseShellExecute = false,
             CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true
         };
+#if UPDATE_FIXTURE
+        start.Environment["LOCALAPPDATA"] = UpdateFixture.DataParent;
+#endif
         start.ArgumentList.Add("-B");
         start.ArgumentList.Add("-X");
         start.ArgumentList.Add("utf8");

@@ -1,14 +1,25 @@
+param([string]$FixtureVersion)
+
 $ErrorActionPreference = 'Stop'
 Push-Location (Split-Path -Parent $PSScriptRoot)
 try {
     $runtime = '8.0.33'
-    $version = (dotnet msbuild src/Companion -nologo -getProperty:Version).Trim()
-    if ($LASTEXITCODE -ne 0 -or $version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid app version.' }
-    $staging = Join-Path (Get-Location) "artifacts/staging-$version"
+    $artifacts = Join-Path (Get-Location) 'artifacts'
+    $publishOptions = @('-p:UpdateFixture=false')
+    if ($FixtureVersion) {
+        $version = $FixtureVersion
+        $artifacts = Join-Path $artifacts 'update-popup-fixtures'
+        $publishOptions = @('-p:UpdateFixture=true', "-p:Version=$version")
+    } else {
+        $version = (dotnet msbuild src/Companion -nologo -getProperty:Version).Trim()
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot read the app version.' }
+    }
+    if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid app version.' }
+    $staging = Join-Path $artifacts "staging-$version"
     dotnet publish src/Companion -c Release -r win-x64 --self-contained true `
         "-p:RuntimeFrameworkVersion=$runtime" -p:PublishSingleFile=true `
         -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true `
-        -p:DebugType=None -o $staging
+        -p:DebugType=None -o $staging @publishOptions
     if ($LASTEXITCODE -ne 0) { throw 'Publish failed.' }
     $productVersion = (Get-Item -LiteralPath (Join-Path $staging 'ZEDZONE.Companion.exe')).VersionInfo.ProductVersion
     if (($productVersion -split '\+', 2)[0] -ne $version) { throw 'App and package versions differ.' }
@@ -49,7 +60,7 @@ try {
     }
     Copy-Item -LiteralPath scripts/converter-bootstrap.py, scripts/converter-packages.json -Destination $converter
     Copy-Item -LiteralPath README.md, LICENSE, scripts/probe-recipes.py -Destination $staging
-    $zip = Join-Path (Get-Location) "artifacts/ZEDZONE-Companion-$version-win-x64.zip"
+    $zip = Join-Path $artifacts "ZEDZONE-Companion-$version-win-x64.zip"
     $contents = 'ZEDZONE.Companion.exe', 'README.md', 'LICENSE', 'probe-recipes.py', 'dotnet-notices', 'converter' |
         ForEach-Object { Join-Path $staging $_ }
     Compress-Archive -LiteralPath $contents -DestinationPath $zip -Force

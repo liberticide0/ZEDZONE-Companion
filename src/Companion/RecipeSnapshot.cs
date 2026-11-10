@@ -51,8 +51,7 @@ internal sealed class RecipeSnapshot
         if (build.Length is < 1 or > 20 || !build.All(char.IsAsciiDigit))
             return null;
 
-        string path = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "ZEDZONE.Companion", $"recipes-{build}.json");
+        string path = Path.Combine(UpdateFixture.DataPath, $"recipes-{build}.json");
         try
         {
             if (!File.Exists(path) || new FileInfo(path).Length > 8 * 1024 * 1024)

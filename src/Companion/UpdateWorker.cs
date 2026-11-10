@@ -6,6 +6,7 @@ internal static class UpdateWorker
 {
     private const string TempPrefix = "ZEDZONE-Companion-update-";
     private const string Helper = "Companion-update.exe";
+    private const string RestartNotice = ".companion-restart-needed";
     internal static string InstallPath => Path.GetDirectoryName(Environment.ProcessPath!)!;
     internal static bool IsPortable =>
         string.Equals(Path.GetFileName(Environment.ProcessPath), UpdatePackage.Exe, StringComparison.OrdinalIgnoreCase) &&
@@ -71,14 +72,32 @@ internal static class UpdateWorker
             try { Start(exe, "--finish-update", token.ToString("N"), result); }
             catch (Exception error) when (IsUpdateError(error))
             {
-                MessageBox.Show("Companion을 다시 열지 못했습니다. 기존 설치 폴더에서 실행 파일을 열어 주세요.",
-                    "ZED ZONE Companion", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                try
+                {
+                    new UpdatePackage(install).CheckWritable();
+                    using var notice = new FileStream(Path.Combine(install, RestartNotice), FileMode.CreateNew);
+                }
+                catch (Exception noticeError) when (IsUpdateError(noticeError)) { }
             }
         }
         finally
         {
             instance.ReleaseMutex();
         }
+    }
+
+    internal static bool ConsumeRestartNotice()
+    {
+        string path = Path.Combine(InstallPath, RestartNotice);
+        if (!File.Exists(path))
+            return false;
+        try
+        {
+            new UpdatePackage(InstallPath).CheckWritable();
+            File.Delete(path);
+        }
+        catch (Exception error) when (IsUpdateError(error)) { }
+        return true;
     }
 
     internal static void CleanupLater(Guid token) => _ = Task.Run(async () =>

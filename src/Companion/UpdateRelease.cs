@@ -9,7 +9,7 @@ internal sealed record UpdateRelease(Version Version, Uri Download, long Size, s
     private const string Repo = "liberticide0/ZEDZONE-Companion";
     private const long MaxDownload = 256L * 1024 * 1024;
     private static readonly Uri Latest = new($"https://api.github.com/repos/{Repo}/releases/latest");
-    private static readonly HttpClient Http = new(new HttpClientHandler { AllowAutoRedirect = false })
+    private static readonly HttpClient Http = new(UpdateFixture.CreateHandler())
     {
         Timeout = TimeSpan.FromSeconds(30),
         MaxResponseContentBufferSize = 1024 * 1024

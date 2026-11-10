@@ -2,7 +2,7 @@ namespace Companion;
 
 internal sealed class Overlay : Form
 {
-    private const string AppTitle = "ZED ZONE Companion";
+    private const string AppTitle = "ZED ZONE Companion" + UpdateFixture.TitleSuffix;
     private const string PrepareLabel = "Steam 제작법 불러오기";
     private const string ImportLabel = "자료 파일 가져오기";
     private const string PrepareHint = "설치된 ZED ZONE에서 제작법을 읽습니다. Steam 업데이트 후 다시 실행하세요.";
@@ -39,6 +39,8 @@ internal sealed class Overlay : Form
     private readonly Button saveGoal = ActionButton("목표 저장");
     private readonly Button prepareRecipes = ActionButton(PrepareLabel);
     private readonly Button checkUpdate = ActionButton("업데이트 확인");
+    private readonly UpdatePopup updatePopup;
+    private TableLayoutPanel content = null!;
     private readonly ToolTip hints = new() { ShowAlways = true };
     private readonly CancellationTokenSource preparationLifetime = new();
     private readonly Panel side = new() { Dock = DockStyle.Fill, Margin = Padding.Empty };
@@ -108,6 +110,7 @@ internal sealed class Overlay : Form
         BackColor = Color.FromArgb(16, 24, 21);
         ForeColor = Ink;
         Font = new Font("Malgun Gothic", 10);
+        updatePopup = new UpdatePopup(Font, Surface, Ink, Accent, ActionButton(""), ActionButton(""));
         collectedFont = new Font(Font, FontStyle.Strikeout);
         StartPosition = FormStartPosition.CenterScreen;
         AutoScaleMode = AutoScaleMode.Dpi;
@@ -133,6 +136,9 @@ internal sealed class Overlay : Form
             Native.GetWindowThreadProcessId(previous, out previousPid);
 
         BuildLayout();
+        Controls.Add(updatePopup);
+        ClientSizeChanged += (_, _) => updatePopup.Recenter();
+        DpiChanged += (_, _) => updatePopup.Recenter();
         try
         {
             wishlist = WishlistStore.Load(WishlistStore.PathForUser);
@@ -185,7 +191,7 @@ internal sealed class Overlay : Form
         {
             FocusSearch();
             if (updateWarning is not null)
-                ShowUpdateMessage(updateWarning, MessageBoxIcon.Warning);
+                ShowUpdatePopup("업데이트 안내", updateWarning);
             var (detected, recipes, game) = await Task.Run(ReadInstalledData);
             if (IsDisposed || Disposing)
                 return;
@@ -289,13 +295,14 @@ internal sealed class Overlay : Form
 
     private async Task CheckUpdateAsync()
     {
-        if (updating || fileDialogOpen)
+        if (updating || fileDialogOpen || updatePopup.Visible)
             return;
         if (preparingRecipes)
         {
-            ShowUpdateMessage("제작법을 불러온 뒤 업데이트를 확인해 주세요.");
+            ShowUpdatePopup("제작법을 불러오는 중", "제작법 준비가 끝난 뒤 업데이트를 확인해 주세요.");
             return;
         }
+        Control? origin = ActiveControl;
         updating = true;
         checkUpdate.Enabled = false;
         prepareRecipes.Enabled = false;
@@ -312,15 +319,28 @@ internal sealed class Overlay : Form
                 return;
             if (release is null)
             {
-                ShowUpdateMessage($"현재 v{current}을(를) 사용 중입니다. 새 정식 업데이트가 없습니다.");
+                await AskUpdatePopupAsync("새 업데이트 없음",
+                    $"현재 버전  v{current}\n새 정식 업데이트가 없습니다.");
                 return;
             }
-            if (!ConfirmUpdate(current, release.Version))
+            if (!await AskUpdatePopupAsync("새 Companion 버전",
+                $"현재 버전  v{current}\n새 버전      v{release.Version}\n\n패키지를 확인한 뒤 같은 폴더에서 Companion을 다시 시작합니다.",
+                "업데이트 후 다시 시작", "나중에"))
                 return;
-            updateStatus = "업데이트를 내려받고 확인하는 중…";
-            UpdateStatus();
-            await UpdateWorker.HandOffAsync(release, timeout.Token);
-            ExitApp();
+            using var download = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token);
+            ShowUpdatePopup("업데이트 준비 중", $"v{release.Version} 패키지를 내려받고 확인하는 중입니다.",
+                cancel: "취소", completed: _ => download.Cancel());
+            try
+            {
+                await UpdateWorker.HandOffAsync(release, download.Token);
+                ExitApp();
+            }
+            catch (OperationCanceledException) when (download.IsCancellationRequested && !timeout.IsCancellationRequested) { }
+            finally
+            {
+                if (!IsDisposed && !Disposing && updatePopup.Visible)
+                    updatePopup.Close(false);
+            }
         }
         catch (Exception error) when (UpdateWorker.IsUpdateError(error))
         {
@@ -333,8 +353,8 @@ internal sealed class Overlay : Form
                     InvalidDataException => error.Message,
                     _ => "패키지 파일이나 설치 폴더를 확인할 수 없습니다."
                 };
-                ShowUpdateMessage($"업데이트를 준비하지 못했습니다.\n\n{detail}\n\n현재 버전으로 계속 사용할 수 있습니다.",
-                    MessageBoxIcon.Warning);
+                await AskUpdatePopupAsync("업데이트를 준비하지 못했습니다",
+                    $"{detail}\n\n현재 버전으로 계속 사용할 수 있습니다.");
             }
         }
         finally
@@ -346,47 +366,36 @@ internal sealed class Overlay : Form
                 checkUpdate.Enabled = true;
                 prepareRecipes.Enabled = steamGameDirectory is not null;
                 UpdateStatus();
+                if (origin?.CanFocus == true)
+                    origin.Focus();
             }
         }
     }
 
-    private bool ConfirmUpdate(Version current, Version available)
+    private Task<bool> AskUpdatePopupAsync(string title, string message, string? accept = null, string cancel = "확인")
     {
-        using var dialog = new Form
-        {
-            Text = "새 Companion 버전", Font = Font, BackColor = Surface, ForeColor = Ink,
-            FormBorderStyle = FormBorderStyle.FixedDialog, ShowInTaskbar = false,
-            MaximizeBox = false, MinimizeBox = false, StartPosition = FormStartPosition.CenterParent,
-            AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink
-        };
-        var contents = new FlowLayoutPanel
-        {
-            AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, FlowDirection = FlowDirection.TopDown,
-            WrapContents = false, Dock = DockStyle.Fill, Padding = new Padding(16)
-        };
-        var actions = new FlowLayoutPanel { AutoSize = true };
-        var install = ActionButton("업데이트 후 다시 시작");
-        install.DialogResult = DialogResult.OK;
-        var later = ActionButton("나중에");
-        later.DialogResult = DialogResult.Cancel;
-        actions.Controls.Add(install);
-        actions.Controls.Add(later);
-        contents.Controls.Add(Caption($"현재 v{current} → 새 버전 v{available}", Accent));
-        contents.Controls.Add(Caption("공식 Windows 패키지를 확인한 뒤 Companion을 다시 시작합니다.", Ink));
-        contents.Controls.Add(actions);
-        dialog.Controls.Add(contents);
-        dialog.CancelButton = later;
-        dialog.ActiveControl = later;
-        fileDialogOpen = true;
-        try { return dialog.ShowDialog(this) == DialogResult.OK; }
-        finally { fileDialogOpen = false; }
+        var answer = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        ShowUpdatePopup(title, message, accept, cancel, accepted => answer.SetResult(accepted));
+        return answer.Task;
     }
 
-    private void ShowUpdateMessage(string message, MessageBoxIcon icon = MessageBoxIcon.Information)
+    private void ShowUpdatePopup(string title, string message, string? accept = null, string cancel = "확인",
+        Action<bool>? completed = null)
     {
-        fileDialogOpen = true;
-        try { MessageBox.Show(this, message, AppTitle, MessageBoxButtons.OK, icon); }
-        finally { fileDialogOpen = false; }
+        Control? previousControl = ActiveControl;
+        content.Enabled = false;
+        updatePopup.Open(title, message, accept, cancel, accepted =>
+        {
+            if (!exiting && !IsDisposed && !Disposing)
+            {
+                content.Enabled = true;
+                if (previousControl?.CanFocus == true)
+                    previousControl.Focus();
+                else
+                    query.Focus();
+            }
+            completed?.Invoke(accepted);
+        });
     }
 
     private void BuildLayout()
@@ -399,6 +408,7 @@ internal sealed class Overlay : Form
         root.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         root.RowStyles.Add(new RowStyle(SizeType.Absolute, 36));
         Controls.Add(root);
+        content = root;
 
         var header = new TableLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty, ColumnCount = 3 };
         header.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -948,7 +958,10 @@ internal sealed class Overlay : Form
             if (!fileDialogOpen)
             {
                 if (Visible && Native.GetForegroundWindow() == Handle)
-                    HidePanel();
+                {
+                    if (!updatePopup.Visible)
+                        HidePanel();
+                }
                 else
                     OpenPanel();
             }
@@ -959,6 +972,11 @@ internal sealed class Overlay : Form
 
     protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
     {
+        if (updatePopup.Visible)
+        {
+            updatePopup.HandleKey(keyData);
+            return true;
+        }
         if (keyData == Keys.Escape && !filter.DroppedDown && !recipeSelector.DroppedDown)
         {
             HidePanel();
@@ -1007,7 +1025,10 @@ internal sealed class Overlay : Form
         if (!exiting && e.CloseReason == CloseReason.UserClosing)
         {
             e.Cancel = true;
-            HidePanel();
+            if (updatePopup.Visible)
+                updatePopup.Close(false);
+            else
+                HidePanel();
         }
         base.OnFormClosing(e);
     }
@@ -1015,6 +1036,7 @@ internal sealed class Overlay : Form
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         preparationLifetime.Cancel();
+        updatePopup.Close(false);
         preparationLifetime.Dispose();
         tray.Visible = false;
         tray.Dispose();
@@ -1099,7 +1121,10 @@ internal sealed class Overlay : Form
         if (WindowState == FormWindowState.Minimized)
             WindowState = FormWindowState.Normal;
         Activate();
-        FocusSearch();
+        if (updatePopup.Visible)
+            updatePopup.FocusAction();
+        else
+            FocusSearch();
     }
 
     private void HidePanel()

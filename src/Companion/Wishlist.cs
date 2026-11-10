@@ -13,8 +13,7 @@ internal sealed record WishlistState(int Version, CraftGoal[] Goals, RecipePrefe
 
 internal static class WishlistStore
 {
-    public static string PathForUser => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "ZEDZONE.Companion", "wishlist.json");
+    public static string PathForUser => Path.Combine(UpdateFixture.DataPath, "wishlist.json");
 
     public static WishlistState Load(string path)
     {

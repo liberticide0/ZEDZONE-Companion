@@ -383,12 +383,17 @@ internal sealed class Overlay : Form
         Action<bool>? completed = null)
     {
         Control? previousControl = ActiveControl;
+        // Disabled native RichEdit controls otherwise paint a light system background.
+        details.Hide();
+        planText.Hide();
         content.Enabled = false;
         updatePopup.Open(title, message, accept, cancel, accepted =>
         {
             if (!exiting && !IsDisposed && !Disposing)
             {
                 content.Enabled = true;
+                details.Show();
+                planText.Show();
                 if (previousControl?.CanFocus == true)
                     previousControl.Focus();
                 else

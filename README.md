@@ -2,10 +2,12 @@
 
 ZED ZONE 플레이 중 아이템, 제작법, 스킬, 지역, 보스를 빠르게 찾는 한국어 Windows 오버레이입니다. 기본 자료와 직접 불러온 자료를 오프라인으로 검색합니다.
 
+[**최신 Windows x64 포터블 다운로드**](https://github.com/liberticide0/ZEDZONE-Companion/releases/latest)
+
 ## 실행
 
-1. [GitHub Releases](https://github.com/liberticide0/ZEDZONE-Companion/releases)에서 Windows x64 ZIP을 내려받고 압축을 풉니다.
-2. `ZEDZONE.Companion.exe`를 실행합니다. 관리자 권한이나 별도 설치 프로그램은 필요하지 않습니다.
+1. 최신 릴리스의 **Assets**에서 이름이 `-win-x64.zip`으로 끝나는 포터블 패키지를 내려받고, 쓰기 가능한 사용자 폴더에 압축을 풉니다.
+2. 압축을 푼 폴더에서 `ZEDZONE.Companion.exe`를 실행합니다. 관리자 권한이나 별도 설치 프로그램은 필요하지 않습니다. 기본 검색은 바로 사용할 수 있습니다. Steam 제작법까지 보려면 **Steam 제작법 불러오기**를 누르세요. 변환 도구를 처음 받는 경우 인터넷 연결이 필요합니다.
 3. 게임 창에서 **Ctrl+Shift+Space**로 검색창을 열고 **Esc**로 닫습니다. 시작할 때 검색창이 열려 있으면 먼저 Esc로 숨긴 뒤 게임으로 전환하세요.
 4. 기본 단축키가 이미 사용 중이면 **Ctrl+Shift+F10**을 시도합니다. 현재 단축키는 검색창 하단에 표시됩니다. Windows 알림 영역의 Companion 아이콘에서도 검색창을 열거나 프로그램을 종료할 수 있습니다.
 

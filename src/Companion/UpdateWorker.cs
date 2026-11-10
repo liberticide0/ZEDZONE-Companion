@@ -21,8 +21,7 @@ internal static class UpdateWorker
         try
         {
             // Check folder access before downloading anything.
-            string probe = Path.Combine(InstallPath, $".companion-write-{Guid.NewGuid():N}");
-            using (new FileStream(probe, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1, FileOptions.DeleteOnClose)) { }
+            package.CheckWritable();
             await release.DownloadAsync(archive, cancellation);
             await Task.Run(() => package.Prepare(archive, release.Version, cancellation), cancellation);
             prepared = true;

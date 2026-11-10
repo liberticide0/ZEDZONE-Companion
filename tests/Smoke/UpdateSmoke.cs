@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.IO.Compression;
 using System.Net;
+using System.Security.AccessControl;
 using System.Security.Cryptography;
+using System.Security.Principal;
 using System.Text.Json;
 using Companion;
 
@@ -63,6 +65,26 @@ internal static class UpdateSmoke
                 File.Delete(archive);
             }
             check(!Directory.Exists(Path.Combine(root, "extract")), "unsafe ZIP paths do not create files");
+            if (OperatingSystem.IsWindows())
+            {
+                var protectedFolder = Directory.CreateDirectory(Path.Combine(root, "read only"));
+                using var identity = WindowsIdentity.GetCurrent();
+                var original = protectedFolder.GetAccessControl();
+                var denied = protectedFolder.GetAccessControl();
+                denied.AddAccessRule(new FileSystemAccessRule(identity.User!, FileSystemRights.CreateFiles,
+                    AccessControlType.Deny));
+                protectedFolder.SetAccessControl(denied);
+                try
+                {
+                    await Reject<UnauthorizedAccessException>(() =>
+                    {
+                        new UpdatePackage(protectedFolder.FullName).CheckWritable();
+                        return Task.CompletedTask;
+                    });
+                    check(!protectedFolder.EnumerateFileSystemInfos().Any(), "write-protected installation is detected before download");
+                }
+                finally { protectedFolder.SetAccessControl(original); }
+            }
         }
         finally { Directory.Delete(root, recursive: true); }
     }

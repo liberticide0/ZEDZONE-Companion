@@ -28,6 +28,14 @@ internal sealed class UpdatePackage(string install)
     private string Ready => Path.Combine(Root, "ready");
     private string StagedExe => Path.Combine(Stage, Exe);
 
+    internal void CheckWritable()
+    {
+        CheckTree(install, descend: false);
+        string probe = Path.Combine(install, $".companion-write-{Guid.NewGuid():N}");
+        using var file = new FileStream(probe, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1,
+            FileOptions.DeleteOnClose);
+    }
+
     internal void Prepare(string archive, Version version, CancellationToken cancellation)
     {
         CheckInstall();

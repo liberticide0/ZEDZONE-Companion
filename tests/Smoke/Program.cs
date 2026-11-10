@@ -10,7 +10,10 @@ static void Check(bool condition, string scenario)
 var catalog = new Catalog();
 await UpdateSmoke.Run(Check);
 if (args is ["--update-integration", var older, var newer])
+{
     await UpdateSmoke.Integration(older, newer, Check);
+    args = [];
+}
 RecipeSmoke.Run(Check);
 WishlistSmoke.Run(Check);
 foreach (string query in new[] { "돌망치", "stone hammer", "石锤", "３０３" })

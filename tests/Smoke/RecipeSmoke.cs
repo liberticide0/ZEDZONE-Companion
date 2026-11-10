@@ -43,6 +43,14 @@ internal static class RecipeSmoke
         var press = recipe.Recipes[1].Batch!;
         check(!press.Partial && press.Calculate(7).Output == 12 && press.Calculate(7).Materials.Single().PerBatch == 4,
             "alternative station uses its own production yield");
+        var uses = catalog.RecipeUses(2);
+        check(uses.Count == 2 && uses.All(use => use.Product.ItemId == 1) &&
+            uses[0].Choice.Station == "손 제작" && uses[0].PerBatch == 1.25m &&
+            uses[1].Choice.Station == "탄약 압착기" && uses[1].PerBatch == 2,
+            "ingredient lookup preserves individual variants and sums duplicate positive rows");
+        var uncertainUses = catalog.RecipeUses(3);
+        check(uncertainUses.Count == 2 && uncertainUses.All(use => use.Choice.Batch is null && use.PerBatch == 1),
+            "ingredient lookup excludes negative rows and retains uses with unconfirmed outputs");
         check(recipe.Recipes[2].Batch is null && recipe.Recipes[2].Details.Contains("계산 보류"),
             "conflicting result ID is displayed without a calculation");
         check(recipe.Recipes[3] is { Batch: null } unknown && unknown.Details.Contains("10701") &&
@@ -69,6 +77,8 @@ internal static class RecipeSmoke
         var stale = new Catalog();
         stale.UseSteamLocalization((local, "43"), snapshot);
         check(stale.Find("예제 탄약", Category.Item).Single().Recipes is { Length: 0 }, "different Steam build ignores the cache");
+        catalog.UseSteamLocalization((local, "43"), snapshot);
+        check(catalog.RecipeUses(2).Count == 0, "changing the game build clears ingredient lookup");
         CheckRejected(fixture, "43", check, "snapshot header build mismatch is rejected");
         CheckRejected(fixture.Replace("\"id\":2,\"quantity\":2", "\"id\":999,\"quantity\":2"),
             "42", check, "missing ingredient ID is rejected");

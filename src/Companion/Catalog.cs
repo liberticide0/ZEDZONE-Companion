@@ -26,6 +26,7 @@ internal sealed record Entry(
 }
 
 internal sealed record Material(string Name, decimal PerBatch, int? Id = null);
+internal sealed record RecipeUse(Entry Product, RecipeChoice Choice, decimal PerBatch);
 
 internal sealed record RecipeBatch(int Output, Material[] Materials, bool Partial = true)
 {
@@ -47,6 +48,7 @@ internal sealed class Catalog
     private RecipeSnapshot? recipeSnapshot;
     private Entry[]? entries;
     private Dictionary<int, Entry>? itemIndex;
+    private ILookup<int, RecipeUse> usesByIngredient = null!;
     private SearchDocument[] searchIndex = [];
     private sealed record SearchDocument(Entry Entry, string[] Names, string Id, string Details);
     public string RecipeBuild => recipeSnapshot?.Build ?? "";
@@ -55,6 +57,12 @@ internal sealed class Catalog
     {
         _ = Entries();
         return itemIndex!.GetValueOrDefault(id);
+    }
+
+    public IReadOnlyList<RecipeUse> RecipeUses(int ingredientId)
+    {
+        _ = Entries();
+        return usesByIngredient[ingredientId].ToArray();
     }
     public string DataStatus
     {
@@ -78,6 +86,12 @@ internal sealed class Catalog
             .ToDictionary(group => group.Key, group => MergeItem(group));
         entries = itemIndex.Values.Concat(raw.Where(entry => entry.Category is not (Category.Item or Category.Recipe)
             || !entry.ItemId.HasValue)).ToArray();
+        usesByIngredient = (from product in itemIndex.Values.OrderBy(entry => entry.Title, KoreanOrder)
+                            from choice in product.Recipes ?? []
+                            from input in choice.ListedInputs ?? choice.Batch?.Materials ?? []
+                            where input.Id.HasValue && input.PerBatch > 0
+                            select (Id: input.Id!.Value, Use: new RecipeUse(product, choice, input.PerBatch)))
+            .ToLookup(row => row.Id, row => row.Use);
         searchIndex = entries.Select(entry => new SearchDocument(entry,
             new[] { entry.Korean, entry.English, entry.Chinese, entry.ChineseAlias }.Select(Normalize).ToArray(),
             entry.ItemId?.ToString(CultureInfo.InvariantCulture) ?? "",

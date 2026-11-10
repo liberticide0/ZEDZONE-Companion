@@ -20,7 +20,7 @@ internal sealed record ResearchUnlock(string Name, bool Default, string[] Prereq
 internal sealed record RecipeAsset([property: JsonRequired] int Id, string Korean, string English,
     [property: JsonRequired] bool DefaultUnlock, LocalRecipe[] Recipes, ResearchUnlock[]? Research = null);
 internal sealed record RecipeChoice(string Label, string Details, string Source, RecipeBatch? Batch,
-    string Station, Material[]? Tools = null);
+    string Station, Material[]? Tools = null, Material[]? ListedInputs = null);
 
 internal sealed class RecipeSnapshot
 {
@@ -171,6 +171,6 @@ internal sealed class RecipeSnapshot
             : null;
         return new RecipeChoice($"{number}. {recipe.Station}", string.Join("\n", lines),
             $"로컬 Steam 빌드 {Build} · 아이템 자산의 정적 제작법", batch, recipe.Station,
-            tools.Select(tool => new Material(Name(tool.Id), -tool.Quantity, tool.Id)).ToArray());
+            tools.Select(tool => new Material(Name(tool.Id), -tool.Quantity, tool.Id)).ToArray(), ListedInputs: inputs);
     }
 }

@@ -13,10 +13,11 @@ internal sealed class UpdatePackage(string install)
     [
         Exe, "README.md", "LICENSE", "probe-recipes.py",
         "converter/converter-bootstrap.py", "converter/converter-packages.json",
-        "converter/python/python.exe", "converter/python/LICENSE.txt",
-        "dotnet-notices/microsoft.netcore.app.runtime.win-x64-THIRD-PARTY-NOTICES.TXT",
-        "dotnet-notices/microsoft.windowsdesktop.app.runtime.win-x64-THIRD-PARTY-NOTICES.TXT"
+        "converter/python/python.exe", "converter/python/LICENSE.txt", "converter/python/python3.dll"
     ];
+    private static readonly string[] DotnetPackages =
+        ["microsoft.netcore.app.host.win-x64", "microsoft.netcore.app.runtime.win-x64",
+            "microsoft.windowsdesktop.app.runtime.win-x64"];
     private static readonly Regex Segment = new(@"\A[A-Za-z0-9_-][A-Za-z0-9_.-]*\z", RegexOptions.CultureInvariant);
     private static readonly Regex Device = new(@"\A(?:CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])(?:\.|\z)",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
@@ -206,7 +207,12 @@ internal sealed class UpdatePackage(string install)
             if (written > 0)
                 files.Add(path);
         }
-        if (!Required.All(files.Contains))
+        bool runtime = files.Any(path =>
+            Regex.IsMatch(path, @"\Aconverter/python/python3[0-9]+\.zip\z") &&
+            files.Contains(path[..^4] + ".dll") && files.Contains(path[..^4] + "._pth"));
+        bool notices = DotnetPackages.All(package => files.Contains($"dotnet-notices/{package}-LICENSE") ||
+            files.Contains($"dotnet-notices/{package}-LICENSE.TXT"));
+        if (!Required.All(files.Contains) || !runtime || !notices)
             throw new InvalidDataException("ZIP에 실행 파일, 변환기 또는 배포 고지가 빠졌습니다.");
     }
 

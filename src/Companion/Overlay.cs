@@ -308,7 +308,7 @@ internal sealed class Overlay : Form
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(preparationLifetime.Token);
             timeout.CancelAfter(TimeSpan.FromMinutes(5));
             var release = await UpdateRelease.CheckAsync(current, timeout.Token);
-            if (IsDisposed || Disposing || !Visible)
+            if (IsDisposed || Disposing || !Visible || fileDialogOpen)
                 return;
             if (release is null)
             {

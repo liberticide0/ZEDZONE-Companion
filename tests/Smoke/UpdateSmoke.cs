@@ -11,8 +11,9 @@ internal static class UpdateSmoke
 {
     private static readonly Version Installed = new(0, 4, 6);
     private static readonly Version Next = new(0, 4, 7);
-    private const string Asset = "ZEDZONE-Companion-0.4.7-win-x64.zip";
-    private const string Url = "https://github.com/liberticide0/ZEDZONE-Companion/releases/download/v0.4.7/" + Asset;
+    private static string Asset(Version version) => $"ZEDZONE-Companion-{version}-win-x64.zip";
+    private static string Url(Version version) =>
+        $"https://github.com/liberticide0/ZEDZONE-Companion/releases/download/v{version}/{Asset(version)}";
 
     public static async Task Run(Action<bool, string> check)
     {
@@ -23,7 +24,7 @@ internal static class UpdateSmoke
             string hash = Convert.ToHexString(SHA256.HashData(bytes));
             using var metadata = Feed(hash, bytes.Length, bytes);
             var release = (await UpdateRelease.CheckAsync(Installed, default, metadata))!;
-            check(release.Version == Next && release.Download.AbsoluteUri == Url, "offer a newer official win-x64 release");
+            check(release.Version == Next && release.Download.AbsoluteUri == Url(Next), "offer a newer official win-x64 release");
             check(await UpdateRelease.CheckAsync(Next, default, metadata) is null, "same version is not offered");
             using var preview = Feed(hash, bytes.Length, bytes, prerelease: true);
             check(await UpdateRelease.CheckAsync(Installed, default, preview) is null, "pre-release is ignored");
@@ -104,6 +105,11 @@ internal static class UpdateSmoke
             if (Process.GetProcessesByName("ZEDZONE.Companion").Length != 0)
                 throw new InvalidOperationException("Close Companion before the isolated process integration check.");
             ZipFile.ExtractToDirectory(oldZip, installed);
+            var installedVersion = Version.Parse(FileVersionInfo.GetVersionInfo(app).ProductVersion!.Split('+')[0]);
+            string newName = Path.GetFileName(newZip);
+            var nextVersion = Version.Parse(newName["ZEDZONE-Companion-".Length..^"-win-x64.zip".Length]);
+            if (newName != Asset(nextVersion) || nextVersion <= installedVersion)
+                throw new InvalidDataException("Use a newer ZIP with its official win-x64 filename.");
             string oldHash = Hash(app);
             string preferences = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "ZEDZONE.Companion");
@@ -117,14 +123,14 @@ internal static class UpdateSmoke
             File.AppendAllText(installedReadme, "\nold fixture");
             string oldReadme = Hash(installedReadme);
             byte[] bytes = File.ReadAllBytes(newZip);
-            using var fixture = Feed(Convert.ToHexString(SHA256.HashData(bytes)), bytes.Length, bytes);
-            var release = (await UpdateRelease.CheckAsync(Installed, default, fixture))!;
+            using var fixture = Feed(Convert.ToHexString(SHA256.HashData(bytes)), bytes.Length, bytes, version: nextVersion);
+            var release = (await UpdateRelease.CheckAsync(installedVersion, default, fixture))!;
             string downloaded = Path.Combine(root, "release.zip");
             await release.DownloadAsync(downloaded, default, fixture);
             var package = new UpdatePackage(installed);
             await Reject<InvalidDataException>(() =>
             {
-                package.Prepare(downloaded, Installed, default);
+                package.Prepare(downloaded, installedVersion, default);
                 return Task.CompletedTask;
             });
             check(!Directory.Exists(journal) && Hash(app) == oldHash, "tag and executable version mismatch leaves installation unchanged");
@@ -148,9 +154,9 @@ internal static class UpdateSmoke
             check(Hash(installedReadme) == oldReadme && Hash(app) == oldHash && !Directory.Exists(journal),
                 "locked managed file rolls back the prior move");
 
-            package.Prepare(downloaded, release.Version, default);
             parent = Start(app);
             await WaitFor(() => { parent.Refresh(); return parent.MainWindowHandle != 0; });
+            package.Prepare(downloaded, release.Version, default);
             Directory.CreateDirectory(helperDir);
             string helper = Path.Combine(helperDir, "Companion-update.exe");
             File.Copy(app, helper);
@@ -164,7 +170,8 @@ internal static class UpdateSmoke
             {
                 foreach (var process in Process.GetProcessesByName("ZEDZONE.Companion"))
                 {
-                    if (process.MainModule?.FileName == app && process.MainWindowHandle != 0)
+                    if (string.Equals(process.MainModule?.FileName, app, StringComparison.OrdinalIgnoreCase) &&
+                        process.MainWindowHandle != 0)
                     {
                         restarted = process;
                         return true;
@@ -173,7 +180,7 @@ internal static class UpdateSmoke
                 }
                 return false;
             });
-            check(FileVersionInfo.GetVersionInfo(app).ProductVersion?.Split('+')[0] == Next.ToString() &&
+            check(FileVersionInfo.GetVersionInfo(app).ProductVersion?.Split('+')[0] == nextVersion.ToString() &&
                 restarted is not null && Hash(app) != oldHash, "worker installs the new version and relaunches at the same path");
             check(!Directory.Exists(journal) && File.ReadAllText(personal) == "retain" &&
                 userHashes.All(pair => Hash(pair.Key) == pair.Value), "user files and unrelated installation files are preserved");
@@ -190,9 +197,26 @@ internal static class UpdateSmoke
                 }
                 process.Dispose();
             }
-            if (Directory.Exists(helperDir)) Directory.Delete(helperDir, recursive: true);
-            Directory.Delete(root, recursive: true);
+            await Cleanup(helperDir);
+            await Cleanup(root);
         }
+    }
+
+    private static async Task Cleanup(string path)
+    {
+        for (int attempt = 0; attempt < 20; attempt++)
+        {
+            try
+            {
+                if (Directory.Exists(path)) Directory.Delete(path, recursive: true);
+                return;
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                await Task.Delay(250);
+            }
+        }
+        Console.WriteLine($"WARN  Could not clean the isolated test folder {path}");
     }
 
     private static string Hash(string file)
@@ -227,14 +251,18 @@ internal static class UpdateSmoke
         throw new InvalidOperationException($"Expected {typeof(T).Name}.");
     }
 
-    private static HttpClient Feed(string hash, int length, byte[] bytes, bool prerelease = false, bool draft = false) =>
-        new(new Reply((request, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+    private static HttpClient Feed(string hash, int length, byte[] bytes, bool prerelease = false, bool draft = false,
+        Version? version = null)
+    {
+        version ??= Next;
+        return new HttpClient(new Reply((request, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = request.RequestUri!.Host == "api.github.com"
-                ? new StringContent(JsonSerializer.Serialize(new { draft, prerelease, tag_name = "v0.4.7", assets = new[]
-                    { new { name = Asset, size = length, state = "uploaded", browser_download_url = Url, digest = "sha256:" + hash } } }))
+                ? new StringContent(JsonSerializer.Serialize(new { draft, prerelease, tag_name = $"v{version}", assets = new[]
+                    { new { name = Asset(version), size = length, state = "uploaded", browser_download_url = Url(version), digest = "sha256:" + hash } } }))
                 : new ByteArrayContent(bytes)
         })));
+    }
 
     private sealed class Reply(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> reply)
         : HttpMessageHandler

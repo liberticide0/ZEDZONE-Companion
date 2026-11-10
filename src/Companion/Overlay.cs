@@ -383,9 +383,10 @@ internal sealed class Overlay : Form
         Action<bool>? completed = null)
     {
         Control? previousControl = ActiveControl;
-        // Disabled native RichEdit controls otherwise paint a light system background.
+        // These native controls otherwise paint a light system background while disabled.
         details.Hide();
         planText.Hide();
+        materialChecklist.Hide();
         content.Enabled = false;
         updatePopup.Open(title, message, accept, cancel, accepted =>
         {
@@ -394,6 +395,7 @@ internal sealed class Overlay : Form
                 content.Enabled = true;
                 details.Show();
                 planText.Show();
+                materialChecklist.Show();
                 if (previousControl?.CanFocus == true)
                     previousControl.Focus();
                 else

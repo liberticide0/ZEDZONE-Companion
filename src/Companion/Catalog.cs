@@ -4,7 +4,7 @@ using Microsoft.VisualBasic.FileIO;
 
 namespace Companion;
 
-internal enum Category { Item, Recipe, Skill, Map, Boss }
+internal enum Category { Item, Recipe, Skill, Map, Boss, Construction }
 
 internal sealed record Entry(
     Category Category, string Korean, string English, string Chinese, string Details, string Source,
@@ -19,6 +19,7 @@ internal sealed record Entry(
         Category.Skill => "스킬",
         Category.Map => "지도",
         Category.Boss => "보스",
+        Category.Construction => "건설",
         _ => ""
     };
     public override string ToString() => $"{Title} ({CategoryName})";
@@ -179,7 +180,8 @@ internal sealed class Catalog
         var terms = Normalize(query).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
         _ = Entries();
         var documents = searchIndex.Where(d => category is null || d.Entry.Category == category ||
-            category == Category.Recipe && d.Entry.Category == Category.Item && d.Entry.Recipes is { Length: > 0 });
+            category == Category.Recipe && (d.Entry.Category == Category.Construction ||
+                d.Entry.Category == Category.Item && d.Entry.Recipes is { Length: > 0 }));
 
         if (terms.Length == 0)
             return documents.Select(d => d.Entry).OrderBy(e => e.Category).ThenBy(e => e.Korean.Length == 0)

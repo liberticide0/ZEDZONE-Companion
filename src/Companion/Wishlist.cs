@@ -4,7 +4,9 @@ namespace Companion;
 
 internal sealed record CraftGoal(int Id, string Name, int Quantity);
 internal sealed record RecipePreference(int Id, string Build, int Index);
-internal sealed record WishlistState(int Version, CraftGoal[] Goals, RecipePreference[] Preferences)
+internal sealed record MaterialCheck(string Build, int? Id, string Name, decimal Quantity);
+internal sealed record WishlistState(int Version, CraftGoal[] Goals, RecipePreference[] Preferences,
+    MaterialCheck[]? Collected = null)
 {
     public static WishlistState Empty => new(1, [], []);
 }
@@ -26,6 +28,7 @@ internal static class WishlistStore
         if (state is not { Version: 1, Goals: not null, Preferences: not null } ||
             state.Goals.Any(goal => goal is not { Id: >= 0 and < 100_000, Quantity: >= 1 and <= 999, Name: not null }) ||
             state.Preferences.Any(choice => choice is not { Id: >= 0 and < 100_000, Index: >= 0, Build: not null }) ||
+            state.Collected?.Any(material => material is not { Build: not null, Name: not null, Quantity: > 0 }) == true ||
             state.Goals.Select(goal => goal.Id).Distinct().Count() != state.Goals.Length ||
             state.Preferences.Select(choice => choice.Id).Distinct().Count() != state.Preferences.Length)
             throw new InvalidDataException("찜목록 형식이 올바르지 않습니다.");

@@ -78,10 +78,11 @@ def localization_text(path: Path) -> dict:
         }
 
 
-def read_guides(resources, text: dict):
+def read_guides(resources, text: dict, items: dict):
     skills = {}
     bosses = []
     technology = {}
+    construction = []
     for path, pointer in resources:
         if path.startswith("properties/technodes/"):
             node = pointer.deref().parse_as_dict()
@@ -97,6 +98,10 @@ def read_guides(resources, text: dict):
                 bosses.append({"category": "boss", "korean": "", "english": boss["monsterName_English"],
                                "chinese": boss["monsterName"], "textId": boss["monsterId"],
                                "details": "몬스터 자산에 기록된 이름입니다. 등장 조건과 행동은 미검증입니다."})
+        elif path.startswith("properties/terrainobjects/"):
+            obj = pointer.deref().parse_as_dict()
+            if obj["recipeData"]["recipeItems"]:
+                construction.append(obj)
 
     guides = bosses
     for text_id, nodes in sorted(skills.items()):
@@ -133,7 +138,57 @@ def read_guides(resources, text: dict):
                 "name": tech_name(node["techNodeID"]), "default": node["unlockByDefault"],
                 "prerequisites": [tech_name(i) for i in node["precondition"]["preIDList"]],
             })
+    guides.extend(construction_guides(construction, technology, tech_name, text, items))
     return unlocks, guides
+
+
+def construction_guides(objects, technology, tech_name, text, items):
+    korean_by_english = {}
+    for korean, english in text.values():
+        if korean and korean != "[NO_SOURCE]" and english and english != "[NO_SOURCE]":
+            korean_by_english.setdefault(english.casefold(), set()).add(korean)
+
+    def item_name(item_id):
+        korean, english = text.get(1_000_000 + item_id, ("", ""))
+        asset = items.get(item_id, {})
+        return next((name for name in (korean, english, asset.get("itemName_Runtime"))
+                     if name and name != "[NO_SOURCE]"), f"아이템 ID {item_id}")
+
+    for obj in sorted(objects, key=lambda obj: obj["id"]):
+        object_id = obj["id"]
+        recipe = obj["recipeData"]
+        english = obj["englishName"].strip()
+        chinese = obj["chineseName"].strip()
+        matches = korean_by_english.get(english.casefold(), set())
+        korean = next(iter(matches)) if len(matches) == 1 else ""
+        lines = [f"배치물 ID  {object_id}", "설치 방식  건설 메뉴 · 로컬 배치물 자산"]
+        if recipe["itemId"] == object_id and recipe["outputItemNumber"] > 0:
+            lines.append(f"회당 배치  {recipe['outputItemNumber']}개")
+        else:
+            lines.append(f"배치 수량  결과 ID {recipe['itemId']} · 실제 배치 미확인")
+        materials = {}
+        for material in recipe["recipeItems"]:
+            item_id, quantity = material["itemId"], material["itemNumber"]
+            if item_id in items and quantity > 0:
+                materials[item_id] = materials.get(item_id, 0) + quantity
+            else:
+                lines.append(f"해석 미확인  {item_name(item_id)} ({quantity:.6g})")
+        for item_id, quantity in materials.items():
+            lines.append(f"필요 재료  {item_name(item_id)} × {quantity:.6g}")
+        if recipe["toolType"]:
+            lines.append(f"도구 유형  코드 {recipe['toolType']} · 의미 미검증")
+        if recipe["iqReqiared"] or recipe["craftReqiared"]:
+            lines.append(f"자산 요구 수치  지능 {recipe['iqReqiared']:.6g} / 제작 {recipe['craftReqiared']:.6g}")
+        lines.append(f"기본 해금 플래그  {'켜짐' if obj['unlockByDefault'] else '꺼짐'}")
+        for node in technology.values():
+            if object_id in node["unlockBuildingItems"]:
+                required = ", ".join(tech_name(i) for i in node["precondition"]["preIDList"])
+                lines.append(f"연결 연구  {tech_name(node['techNodeID'])}" + (f" · 직전 선행 {required}" if required else ""))
+        lines.append(f"자산 기본 내구도  {obj['defaultHP']:.6g}")
+        if obj["electricConsuming"] and obj["electricWattage"] > 0:
+            lines.append(f"자산 소비 전력  {obj['electricWattage']:.6g} W")
+        yield {"category": "construction", "korean": korean, "english": english or ("" if chinese else f"배치물 {object_id}"),
+               "chinese": chinese, "textId": object_id, "details": "\n".join(lines)}
 
 
 def write_snapshot(game: Path) -> Path:
@@ -149,7 +204,7 @@ def write_snapshot(game: Path) -> Path:
     environment, resources = read_resources(game)
     assets = read_item_assets(game, resources)
     names = localization_text(localization)
-    unlocks, guides = read_guides(resources, names)
+    unlocks, guides = read_guides(resources, names, assets)
     if before != [file.stat().st_mtime_ns for file in sources] or build != steam_build(manifest, game):
         raise ValueError("Steam files changed during extraction; run it again after the update")
 

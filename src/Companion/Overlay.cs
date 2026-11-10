@@ -12,7 +12,7 @@ internal sealed class Overlay : Form
     private static readonly Color Surface = Color.FromArgb(28, 39, 35);
     private static readonly Color Accent = Color.FromArgb(164, 223, 170);
     private static readonly Category?[] Filters =
-        [null, Category.Item, Category.Recipe, Category.Skill, Category.Map, Category.Boss];
+        [null, Category.Item, Category.Recipe, Category.Skill, Category.Map, Category.Boss, Category.Construction];
 
     private readonly Catalog catalog = new();
     private readonly TextBox query = new()
@@ -52,12 +52,21 @@ internal sealed class Overlay : Form
         Dock = DockStyle.Fill, BorderStyle = BorderStyle.None, ReadOnly = true, DetectUrls = false,
         ScrollBars = RichTextBoxScrollBars.Vertical
     };
+    private readonly ListView materialChecklist = new()
+    {
+        AccessibleName = "직접 확보할 재료 체크리스트", BackColor = Surface, ForeColor = Ink,
+        Dock = DockStyle.Fill, BorderStyle = BorderStyle.None, CheckBoxes = true,
+        FullRowSelect = true, MultiSelect = false, View = View.Details, HeaderStyle = ColumnHeaderStyle.None
+    };
+    private readonly RowStyle materialRow = new(SizeType.Percent, 42);
+    private readonly Font collectedFont;
     private Control detailView = null!;
     private Control wishlistView = null!;
     private WishlistState wishlist = WishlistState.Empty;
     private bool bindingRecipes;
     private bool wishlistUnreadable;
     private bool showingWishlist;
+    private bool bindingMaterials;
     private bool compact;
     private readonly ComboBox recipeSelector = new()
     {
@@ -96,6 +105,7 @@ internal sealed class Overlay : Form
         BackColor = Color.FromArgb(16, 24, 21);
         ForeColor = Ink;
         Font = new Font("Malgun Gothic", 10);
+        collectedFont = new Font(Font, FontStyle.Strikeout);
         StartPosition = FormStartPosition.CenterScreen;
         AutoScaleMode = AutoScaleMode.Dpi;
         ClientSize = new Size(880, 570);
@@ -302,7 +312,7 @@ internal sealed class Overlay : Form
         searchRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         searchRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         query.Dock = DockStyle.Fill;
-        filter.Items.AddRange(["전체", "아이템", "제작법", "스킬", "지도", "보스"]);
+        filter.Items.AddRange(["전체", "아이템", "제작법", "스킬", "지도", "보스", "건설"]);
         filter.SelectedIndex = 0;
         var import = ActionButton(ImportLabel);
         import.AccessibleDescription = ImportHint;
@@ -404,12 +414,13 @@ internal sealed class Overlay : Form
     {
         var view = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill, Padding = new Padding(13), BackColor = Surface, ColumnCount = 1, RowCount = 4
+            Dock = DockStyle.Fill, Padding = new Padding(13), BackColor = Surface, ColumnCount = 1, RowCount = 5
         };
         view.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        view.RowStyles.Add(new RowStyle(SizeType.Percent, 32));
+        view.RowStyles.Add(new RowStyle(SizeType.Percent, 24));
         view.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        view.RowStyles.Add(new RowStyle(SizeType.Percent, 68));
+        view.RowStyles.Add(materialRow);
+        view.RowStyles.Add(new RowStyle(SizeType.Percent, 34));
         view.Controls.Add(Caption("제작 목표", Accent), 0, 0);
         view.Controls.Add(goals, 0, 1);
         var actions = new FlowLayoutPanel { AutoSize = true, Dock = DockStyle.Fill };
@@ -424,7 +435,17 @@ internal sealed class Overlay : Form
         actions.Controls.Add(edit);
         actions.Controls.Add(remove);
         view.Controls.Add(actions, 0, 2);
-        view.Controls.Add(planText, 0, 3);
+        var materials = new TableLayoutPanel { Dock = DockStyle.Fill, RowCount = 2, ColumnCount = 1 };
+        materials.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        materials.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        materials.Controls.Add(Caption("직접 확보할 재료 · 모으면 체크", Accent), 0, 0);
+        materialChecklist.Columns.Add("재료");
+        materialChecklist.Resize += (_, _) => materialChecklist.Columns[0].Width =
+            Math.Max(0, materialChecklist.ClientSize.Width - SystemInformation.VerticalScrollBarWidth);
+        materialChecklist.ItemCheck += CheckMaterial;
+        materials.Controls.Add(materialChecklist, 0, 1);
+        view.Controls.Add(materials, 0, 3);
+        view.Controls.Add(planText, 0, 4);
         return view;
     }
 
@@ -473,7 +494,7 @@ internal sealed class Overlay : Form
             saveGoal.Text = "저장됨";
     }
 
-    private bool SaveWishlist(WishlistState candidate)
+    private bool SaveWishlist(WishlistState candidate, bool refresh = true)
     {
         if (wishlistUnreadable)
         {
@@ -484,13 +505,59 @@ internal sealed class Overlay : Form
         {
             WishlistStore.Save(WishlistStore.PathForUser, candidate);
             wishlist = candidate;
-            RefreshWishlist();
+            if (refresh)
+                RefreshWishlist();
             return true;
         }
         catch (Exception error) when (Catalog.IsImportError(error))
         {
             status.Text = "찜목록 저장 실패 · 기존 목표를 유지합니다.";
             return false;
+        }
+    }
+
+    private void CheckMaterial(object? sender, ItemCheckEventArgs e)
+    {
+        if (bindingMaterials)
+            return;
+        var row = materialChecklist.Items[e.Index];
+        var key = (MaterialCheck)row.Tag!;
+        bool collected = e.NewValue == CheckState.Checked;
+        var checks = (wishlist.Collected ?? []).Where(check => check.Build == key.Build &&
+            (check.Id != key.Id || check.Name != key.Name));
+        if (!SaveWishlist(wishlist with { Collected = collected ? [.. checks, key] : checks.ToArray() }, refresh: false))
+        {
+            e.NewValue = e.CurrentValue;
+            return;
+        }
+        row.Font = collected ? collectedFont : Font;
+        row.ForeColor = collected ? Muted : Ink;
+    }
+
+    private void ShowMaterialChecklist(CraftAmount[] amounts)
+    {
+        bindingMaterials = true;
+        materialChecklist.BeginUpdate();
+        try
+        {
+            materialChecklist.Items.Clear();
+            foreach (var amount in amounts)
+            {
+                var key = new MaterialCheck(catalog.RecipeBuild, amount.Id, amount.Name, amount.Quantity);
+                bool collected = wishlist.Collected?.Contains(key) == true;
+                materialChecklist.Items.Add(new ListViewItem($"× {amount.Quantity:0.######}    {amount.Name}")
+                {
+                    Tag = key, Checked = collected, Font = collected ? collectedFont : Font,
+                    ForeColor = collected ? Muted : Ink
+                });
+            }
+            materialRow.SizeType = amounts.Length == 0 ? SizeType.Absolute : SizeType.Percent;
+            materialRow.Height = amounts.Length == 0 ? 0 : 42;
+        }
+        finally
+        {
+            materialChecklist.EndUpdate();
+            bindingMaterials = false;
         }
     }
 
@@ -512,12 +579,7 @@ internal sealed class Overlay : Form
         {
             var plan = CraftPlanner.Calculate(wishlist, catalog.RecipeBuild, catalog.Item);
             var document = new DetailDocument();
-            if (plan.Materials.Length > 0)
-            {
-                document.Heading("직접 확보할 재료");
-                foreach (var material in plan.Materials)
-                    document.Field($"× {material.Quantity:0.######}", material.Name, indent: 1440);
-            }
+            ShowMaterialChecklist(plan.Materials);
             if (plan.Tools.Length > 0)
             {
                 document.Heading("필요 도구");
@@ -546,6 +608,7 @@ internal sealed class Overlay : Form
         }
         catch (OverflowException)
         {
+            ShowMaterialChecklist([]);
             planText.Text = "필요 재료 수가 계산 범위를 넘습니다. 목표 수량을 줄여 주세요.";
         }
     }
@@ -684,7 +747,18 @@ internal sealed class Overlay : Form
             });
             if (aliases.Length > 0)
                 document.Aliases(aliases);
-            if (entry.Details.Length > 0)
+            if (entry.Category == Category.Construction)
+            {
+                foreach (string line in entry.Details.Split('\n'))
+                {
+                    int separator = line.IndexOf("  ", StringComparison.Ordinal);
+                    if (separator > 0)
+                        document.Field(line[..separator], line[(separator + 2)..]);
+                    else if (line.Length > 0)
+                        document.Body(line);
+                }
+            }
+            else if (entry.Details.Length > 0)
                 document.Body(entry.Details);
         }
         if (choice is not null)
@@ -828,6 +902,7 @@ internal sealed class Overlay : Form
         tray.Dispose();
         menu.Dispose();
         hints.Dispose();
+        collectedFont.Dispose();
         base.OnFormClosed(e);
     }
 

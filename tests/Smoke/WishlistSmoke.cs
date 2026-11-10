@@ -52,7 +52,14 @@ internal static class WishlistSmoke
             WishlistStore.Save(file, alternate);
             var restored = WishlistStore.Load(file);
             check(restored.Goals.SequenceEqual(alternate.Goals) &&
-                restored.Preferences.SequenceEqual(alternate.Preferences), "wishlist and station preference restore from disk");
+                restored.Preferences.SequenceEqual(alternate.Preferences) && restored.Collected is null,
+                "existing wishlist without checklist restores");
+            var collected = new MaterialCheck("42", 4, "원재료", 3.5m);
+            WishlistStore.Save(file, alternate with { Collected = [collected] });
+            var checks = WishlistStore.Load(file).Collected;
+            check(checks is not null && checks.SequenceEqual(new[] { collected }) &&
+                !checks.Contains(collected with { Quantity = 5 }) && !checks.Contains(collected with { Build = "43" }),
+                "checklist restores for the same build and required quantity");
             WishlistStore.Save(file, WishlistState.Empty);
             check(WishlistStore.Load(file).Goals.Length == 0 &&
                 Directory.GetFiles(temporary.FullName).Length == 1, "wishlist overwrite leaves no temporary files");

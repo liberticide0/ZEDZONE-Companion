@@ -83,8 +83,9 @@ internal sealed class RecipeSnapshot
         foreach (var asset in assets.Values)
         foreach (var recipe in asset.Recipes)
         {
-            if (recipe is not { Output: > 0 and <= 100_000, Platform: >= 0, ToolType: >= 0, Materials: not null } ||
-                !assets.ContainsKey(recipe.OutputId) ||
+            // An unlisted output can still describe a variant of a known owner. Describe keeps it out of calculations.
+            if (recipe is not { Output: > 0 and <= 100_000, OutputId: >= 0 and < 100_000,
+                Platform: >= 0, ToolType: >= 0, Materials: not null } ||
                 recipe.Materials.Any(m => m is null || !assets.ContainsKey(m.Id) || m.Quantity == 0 ||
                     m.Quantity is > 1_000_000 or < -1_000_000))
                 throw new InvalidDataException("제작법 자료에 확인할 수 없는 산출물 또는 재료가 있습니다.");
@@ -99,11 +100,20 @@ internal sealed class RecipeSnapshot
                 "skill" => Category.Skill,
                 "map" => Category.Map,
                 "boss" => Category.Boss,
+                "construction" => Category.Construction,
                 _ => (Category?)null
             };
             if (category is { } kind)
+            {
+                string source = kind switch
+                {
+                    Category.Boss => "몬스터 자산",
+                    Category.Construction => "배치물 자산",
+                    _ => "현지화 ID"
+                };
                 guides.Add(new Entry(kind, guide.Korean, guide.English, guide.Chinese, guide.Details,
-                    $"로컬 Steam 빌드 {data.Build} · {(kind == Category.Boss ? "몬스터 자산" : "현지화 ID")} {guide.TextId}"));
+                    $"로컬 Steam 빌드 {data.Build} · {source} {guide.TextId}"));
+            }
         }
         return new RecipeSnapshot(data.Build, assets, guides.ToArray());
     }
@@ -151,7 +161,11 @@ internal sealed class RecipeSnapshot
         else if (item.Research is not { Length: > 0 })
             lines.Add("실제 해금 조건 미검증");
         if (item.Id != recipe.OutputId)
+        {
             lines.Add($"산출물 ID {recipe.OutputId}와 소유 아이템 ID {item.Id} 불일치 · 계산 보류");
+            if (!items.ContainsKey(recipe.OutputId))
+                lines.Add("산출물이 설치 빌드의 아이템 자산 목록에 없습니다.");
+        }
 
         var batch = item.Id == recipe.OutputId
             ? new RecipeBatch(recipe.Output, inputs, Partial: unknown.Length > 0 || recipe.ToolType != 0)

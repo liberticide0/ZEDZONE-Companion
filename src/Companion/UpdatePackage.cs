@@ -31,7 +31,7 @@ internal sealed class UpdatePackage(string install)
 
     internal void CheckWritable()
     {
-        CheckTree(install, descend: false);
+        CheckLocation();
         string probe = Path.Combine(install, $".companion-write-{Guid.NewGuid():N}");
         using var file = new FileStream(probe, FileMode.CreateNew, FileAccess.Write, FileShare.None, 1,
             FileOptions.DeleteOnClose);
@@ -95,6 +95,7 @@ internal sealed class UpdatePackage(string install)
     {
         if (!Exists(Root))
             return;
+        CheckLocation();
         CheckTree(Root);
         if (!File.Exists(Owner))
             throw new InvalidDataException("업데이트 임시 폴더의 소유 정보를 확인할 수 없습니다.");
@@ -117,12 +118,25 @@ internal sealed class UpdatePackage(string install)
 
     private void CheckInstall()
     {
-        CheckTree(install, descend: false);
+        CheckLocation();
         if (!File.Exists(Path.Combine(install, Exe)))
             throw new FileNotFoundException("현재 Companion 실행 파일을 찾을 수 없습니다.");
         CheckTree(Path.Combine(install, Exe));
         foreach (string component in Components)
             CheckTree(Path.Combine(install, component));
+    }
+
+    private void CheckLocation()
+    {
+        string data = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "ZEDZONE.Companion");
+        for (var folder = new DirectoryInfo(install); folder is not null; folder = folder.Parent)
+        {
+            if (folder.FullName.Equals(data, StringComparison.OrdinalIgnoreCase) ||
+                folder.Name.Equals("steamapps", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("Steam 또는 Companion 데이터 폴더 밖의 별도 폴더에 ZIP을 풀어 주세요.");
+            CheckTree(folder.FullName, descend: false);
+        }
     }
 
     private void Retire()

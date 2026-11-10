@@ -66,6 +66,13 @@ internal static class UpdateSmoke
                 File.Delete(archive);
             }
             check(!Directory.Exists(Path.Combine(root, "extract")), "unsafe ZIP paths do not create files");
+            string steam = Directory.CreateDirectory(Path.Combine(root, "steamapps", "common", "ZED ZONE")).FullName;
+            await Reject<InvalidDataException>(() =>
+            {
+                new UpdatePackage(steam).CheckWritable();
+                return Task.CompletedTask;
+            });
+            check(!Directory.EnumerateFileSystemEntries(steam).Any(), "update refuses to write inside a Steam game directory");
             if (OperatingSystem.IsWindows())
             {
                 var protectedFolder = Directory.CreateDirectory(Path.Combine(root, "read only"));

@@ -2,13 +2,16 @@ $ErrorActionPreference = 'Stop'
 Push-Location (Split-Path -Parent $PSScriptRoot)
 try {
     $runtime = '8.0.33'
-    $version = '0.4.5'
+    $version = (dotnet msbuild src/Companion -nologo -getProperty:Version).Trim()
+    if ($LASTEXITCODE -ne 0 -or $version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid app version.' }
     $staging = Join-Path (Get-Location) "artifacts/staging-$version"
     dotnet publish src/Companion -c Release -r win-x64 --self-contained true `
         "-p:RuntimeFrameworkVersion=$runtime" -p:PublishSingleFile=true `
         -p:IncludeNativeLibrariesForSelfExtract=true -p:EnableCompressionInSingleFile=true `
         -p:DebugType=None -o $staging
     if ($LASTEXITCODE -ne 0) { throw 'Publish failed.' }
+    $productVersion = (Get-Item -LiteralPath (Join-Path $staging 'ZEDZONE.Companion.exe')).VersionInfo.ProductVersion
+    if (($productVersion -split '\+', 2)[0] -ne $version) { throw 'App and package versions differ.' }
 
     $cacheLine = dotnet nuget locals global-packages --list
     if ($LASTEXITCODE -ne 0) { throw 'Cannot resolve the NuGet cache.' }

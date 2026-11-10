@@ -38,6 +38,7 @@ internal sealed class Overlay : Form
     private readonly Button sizeToggle = ActionButton("작게");
     private readonly Button saveGoal = ActionButton("목표 저장");
     private readonly Button prepareRecipes = ActionButton(PrepareLabel);
+    private readonly Button checkUpdate = ActionButton("업데이트 확인");
     private readonly ToolTip hints = new() { ShowAlways = true };
     private readonly CancellationTokenSource preparationLifetime = new();
     private readonly Panel side = new() { Dock = DockStyle.Fill, Margin = Padding.Empty };
@@ -91,6 +92,8 @@ internal sealed class Overlay : Form
     private string shortcut = "";
     private bool detectingSteam = true;
     private bool preparingRecipes;
+    private bool updating;
+    private string? updateStatus;
     private string? steamGameDirectory;
     private string? preparationStatus;
     private nint previous = Native.GetForegroundWindow();
@@ -98,7 +101,7 @@ internal sealed class Overlay : Form
     private bool exiting;
     private bool fileDialogOpen;
 
-    public Overlay()
+    public Overlay(string? updateWarning = null)
     {
         Text = AppTitle;
         Icon = SystemIcons.Information;
@@ -116,6 +119,12 @@ internal sealed class Overlay : Form
 
         menu = new ContextMenuStrip();
         menu.Items.Add("검색 열기", null, (_, _) => OpenPanel());
+        if (UpdateWorker.IsPortable)
+            menu.Items.Add("업데이트 확인", null, async (_, _) =>
+            {
+                OpenPanel();
+                await CheckUpdateAsync();
+            });
         menu.Items.Add("종료", null, (_, _) => ExitApp());
         tray = new NotifyIcon { Icon = Icon, Text = AppTitle, ContextMenuStrip = menu, Visible = true };
         tray.DoubleClick += (_, _) => OpenPanel();
@@ -137,6 +146,8 @@ internal sealed class Overlay : Form
         prepareRecipes.Visible = RecipePreparation.IsAvailable;
         prepareRecipes.Enabled = false;
         prepareRecipes.Click += async (_, _) => await PrepareRecipesAsync();
+        checkUpdate.Visible = UpdateWorker.IsPortable;
+        checkUpdate.Click += async (_, _) => await CheckUpdateAsync();
         goals.DoubleClick += (_, _) => OpenGoal();
         goals.KeyDown += (_, e) =>
         {
@@ -173,13 +184,15 @@ internal sealed class Overlay : Form
         Shown += async (_, _) =>
         {
             FocusSearch();
+            if (updateWarning is not null)
+                ShowUpdateMessage(updateWarning, MessageBoxIcon.Warning);
             var (detected, recipes, game) = await Task.Run(ReadInstalledData);
             if (IsDisposed || Disposing)
                 return;
 
             detectingSteam = false;
             steamGameDirectory = game;
-            prepareRecipes.Enabled = game is not null;
+            prepareRecipes.Enabled = !updating && game is not null;
             if (catalog.UseSteamLocalization(detected, recipes))
                 RefreshResults();
             RefreshWishlist();
@@ -200,7 +213,7 @@ internal sealed class Overlay : Form
 
     private async Task PrepareRecipesAsync()
     {
-        if (preparingRecipes || steamGameDirectory is not { } game)
+        if (updating || preparingRecipes || steamGameDirectory is not { } game)
             return;
         preparingRecipes = true;
         prepareRecipes.Enabled = false;
@@ -272,6 +285,108 @@ internal sealed class Overlay : Form
                 UpdateStatus();
             }
         }
+    }
+
+    private async Task CheckUpdateAsync()
+    {
+        if (updating || fileDialogOpen)
+            return;
+        if (preparingRecipes)
+        {
+            ShowUpdateMessage("제작법을 불러온 뒤 업데이트를 확인해 주세요.");
+            return;
+        }
+        updating = true;
+        checkUpdate.Enabled = false;
+        prepareRecipes.Enabled = false;
+        updateStatus = "업데이트 확인 중…";
+        UpdateStatus();
+        try
+        {
+            var installed = typeof(Overlay).Assembly.GetName().Version!;
+            var current = new Version(installed.Major, installed.Minor, installed.Build);
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(preparationLifetime.Token);
+            timeout.CancelAfter(TimeSpan.FromMinutes(5));
+            var release = await UpdateRelease.CheckAsync(current, timeout.Token);
+            if (IsDisposed || Disposing || !Visible)
+                return;
+            if (release is null)
+            {
+                ShowUpdateMessage($"현재 v{current}을(를) 사용 중입니다. 새 정식 업데이트가 없습니다.");
+                return;
+            }
+            if (!ConfirmUpdate(current, release.Version))
+                return;
+            updateStatus = "업데이트를 내려받고 확인하는 중…";
+            UpdateStatus();
+            await UpdateWorker.HandOffAsync(release, timeout.Token);
+            ExitApp();
+        }
+        catch (Exception error) when (UpdateWorker.IsUpdateError(error))
+        {
+            if (!IsDisposed && !Disposing && Visible)
+            {
+                string detail = error switch
+                {
+                    UnauthorizedAccessException => "이 설치 폴더에 쓸 수 없습니다. ZIP을 쓰기 가능한 사용자 폴더에 풀어 주세요.",
+                    HttpRequestException or OperationCanceledException => "GitHub 연결을 확인한 뒤 다시 시도해 주세요.",
+                    InvalidDataException => error.Message,
+                    _ => "패키지 파일이나 설치 폴더를 확인할 수 없습니다."
+                };
+                ShowUpdateMessage($"업데이트를 준비하지 못했습니다.\n\n{detail}\n\n현재 버전으로 계속 사용할 수 있습니다.",
+                    MessageBoxIcon.Warning);
+            }
+        }
+        finally
+        {
+            updating = false;
+            updateStatus = null;
+            if (!IsDisposed && !Disposing)
+            {
+                checkUpdate.Enabled = true;
+                prepareRecipes.Enabled = steamGameDirectory is not null;
+                UpdateStatus();
+            }
+        }
+    }
+
+    private bool ConfirmUpdate(Version current, Version available)
+    {
+        using var dialog = new Form
+        {
+            Text = "새 Companion 버전", Font = Font, BackColor = Surface, ForeColor = Ink,
+            FormBorderStyle = FormBorderStyle.FixedDialog, ShowInTaskbar = false,
+            MaximizeBox = false, MinimizeBox = false, StartPosition = FormStartPosition.CenterParent,
+            AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink
+        };
+        var contents = new FlowLayoutPanel
+        {
+            AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, FlowDirection = FlowDirection.TopDown,
+            WrapContents = false, Dock = DockStyle.Fill, Padding = new Padding(16)
+        };
+        var actions = new FlowLayoutPanel { AutoSize = true };
+        var install = ActionButton("업데이트 후 다시 시작");
+        install.DialogResult = DialogResult.OK;
+        var later = ActionButton("나중에");
+        later.DialogResult = DialogResult.Cancel;
+        actions.Controls.Add(install);
+        actions.Controls.Add(later);
+        contents.Controls.Add(Caption($"현재 v{current} → 새 버전 v{available}", Accent));
+        contents.Controls.Add(Caption("공식 Windows 패키지를 확인한 뒤 Companion을 다시 시작합니다.", Ink));
+        contents.Controls.Add(actions);
+        dialog.Controls.Add(contents);
+        dialog.CancelButton = later;
+        dialog.ActiveControl = later;
+        fileDialogOpen = true;
+        try { return dialog.ShowDialog(this) == DialogResult.OK; }
+        finally { fileDialogOpen = false; }
+    }
+
+    private void ShowUpdateMessage(string message, MessageBoxIcon icon = MessageBoxIcon.Information)
+    {
+        fileDialogOpen = true;
+        try { MessageBox.Show(this, message, AppTitle, MessageBoxButtons.OK, icon); }
+        finally { fileDialogOpen = false; }
     }
 
     private void BuildLayout()
@@ -366,8 +481,9 @@ internal sealed class Overlay : Form
         wishlistView.Hide();
         panes.Controls.Add(side, 1, 0);
         root.Controls.Add(panes, 0, 3);
-        var footer = new TableLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty, ColumnCount = 3 };
+        var footer = new TableLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty, ColumnCount = 4 };
         footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         status.AutoSize = false;
@@ -382,8 +498,10 @@ internal sealed class Overlay : Form
         help.Margin = new Padding(3, 0, 0, 0);
         hints.SetToolTip(help, "단축키와 자료 버튼 안내 (F1)");
         help.Click += (_, _) => ShowHelpGuide();
-        footer.Controls.Add(help, 1, 0);
-        footer.Controls.Add(sizeToggle, 2, 0);
+        checkUpdate.Margin = new Padding(3, 0, 0, 0);
+        footer.Controls.Add(checkUpdate, 1, 0);
+        footer.Controls.Add(help, 2, 0);
+        footer.Controls.Add(sizeToggle, 3, 0);
         root.Controls.Add(footer, 0, 4);
     }
 
@@ -914,7 +1032,7 @@ internal sealed class Overlay : Form
             : steamGameDirectory is not null && RecipePreparation.IsAvailable ? "제작법 불러오기 필요"
             : "아이템 검색 가능";
         status.Text = wishlistUnreadable ? "찜목록 파일 읽기 실패 · 기존 파일을 보존합니다." :
-            preparationStatus ?? $"{key}  ·  Esc 닫기  ·  {data}";
+            updateStatus ?? preparationStatus ?? $"{key}  ·  Esc 닫기  ·  {data}";
     }
 
     private void ShowHelpGuide()

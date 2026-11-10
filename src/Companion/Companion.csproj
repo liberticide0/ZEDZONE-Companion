@@ -6,8 +6,11 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <AssemblyName>ZEDZONE.Companion</AssemblyName>
-    <Version>0.1.1</Version>
+    <Version>0.4.8</Version>
     <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(UpdateFixture)' == 'true'">
+    <DefineConstants>$(DefineConstants);UPDATE_FIXTURE</DefineConstants>
   </PropertyGroup>
 </Project>

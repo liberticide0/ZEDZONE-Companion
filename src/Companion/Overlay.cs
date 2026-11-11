@@ -15,7 +15,10 @@ internal sealed class Overlay : Form
         [null, Category.Item, Category.Recipe, Category.Skill, Category.Map, Category.Boss, Category.Construction];
 
     private readonly Catalog catalog = new();
-    private readonly TextBox query = new()
+    private readonly System.Windows.Forms.Timer searchDelay = new() { Interval = 500 };
+    private bool settingSearch;
+    private bool bindingResults;
+    private readonly SearchTextBox query = new()
     {
         AccessibleName = "검색어", PlaceholderText = "한국어, English, 中文 또는 아이템 ID",
         BackColor = Surface, ForeColor = Ink, BorderStyle = BorderStyle.FixedSingle
@@ -89,6 +92,12 @@ internal sealed class Overlay : Form
     {
         AccessibleName = "선택한 항목 설명과 출처", ReadOnly = true, DetectUrls = false,
         BackColor = Surface, ForeColor = Ink, BorderStyle = BorderStyle.None, ScrollBars = RichTextBoxScrollBars.Vertical
+    };
+    private readonly Panel detailBody = new() { Dock = DockStyle.Fill };
+    private readonly FlowLayoutPanel recipeUseLinks = new()
+    {
+        Dock = DockStyle.Fill, AutoScroll = true, FlowDirection = FlowDirection.TopDown,
+        WrapContents = false, Visible = false, AccessibleName = "사용되는 제작법"
     };
 
     private readonly NotifyIcon tray;
@@ -171,17 +180,27 @@ internal sealed class Overlay : Form
                 e.SuppressKeyPress = true;
             }
         };
-        filter.SelectedIndexChanged += (_, _) => RefreshResults();
-        query.TextChanged += (_, _) => RefreshResults();
+        filter.SelectedIndexChanged += (_, _) =>
+        {
+            if (!settingSearch)
+                RefreshResults();
+        };
+        query.TextChanged += (_, _) => QueueSearch();
+        query.CompositionEnded += (_, _) => QueueSearch();
+        searchDelay.Tick += (_, _) => RefreshResults();
         query.KeyDown += (_, e) =>
         {
-            if (e.KeyData == Keys.Down && results.Items.Count > 0)
+            if (!query.IsComposing && e.KeyData == Keys.Down && results.Items.Count > 0)
             {
                 results.Focus();
                 e.SuppressKeyPress = true;
             }
         };
-        results.SelectedIndexChanged += (_, _) => SelectEntry();
+        results.SelectedIndexChanged += (_, _) =>
+        {
+            if (!bindingResults)
+                SelectEntry();
+        };
         recipeSelector.SelectedIndexChanged += (_, _) =>
         {
             if (!bindingRecipes)
@@ -394,7 +413,7 @@ internal sealed class Overlay : Form
     {
         Control? previousControl = ActiveControl;
         // These native controls otherwise paint a light system background while disabled.
-        details.Hide();
+        detailBody.Hide();
         planText.Hide();
         materialChecklist.Hide();
         content.Enabled = false;
@@ -403,7 +422,7 @@ internal sealed class Overlay : Form
             if (!exiting && !IsDisposed && !Disposing)
             {
                 content.Enabled = true;
-                details.Show();
+                detailBody.Show();
                 planText.Show();
                 materialChecklist.Show();
                 if (previousControl?.CanFocus == true)
@@ -501,7 +520,10 @@ internal sealed class Overlay : Form
         detailActions.Controls.Add(recipeSelector, 0, 0);
         detailActions.Controls.Add(recipeUsesToggle, 1, 0);
         detailPanel.Controls.Add(detailActions, 0, 2);
-        detailPanel.Controls.Add(details, 0, 3);
+        detailBody.Controls.Add(details);
+        detailBody.Controls.Add(recipeUseLinks);
+        recipeUseLinks.SizeChanged += (_, _) => FitRecipeUseLinks();
+        detailPanel.Controls.Add(detailBody, 0, 3);
         calculation.Controls.Add(Caption("목표 수량"));
         calculation.Controls.Add(target);
         calculation.Controls.Add(saveGoal);
@@ -627,8 +649,7 @@ internal sealed class Overlay : Form
     {
         if (goals.SelectedItem is not GoalRow row)
             return;
-        filter.SelectedIndex = 1;
-        query.Text = row.Goal.Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        OpenItem(row.Goal.Id, row.Goal.Id.ToString(System.Globalization.CultureInfo.InvariantCulture));
         if (showingWishlist)
             ToggleWishlist();
     }
@@ -784,19 +805,57 @@ internal sealed class Overlay : Form
         e.DrawFocusRectangle();
     }
 
-    private void RefreshResults()
+    private void QueueSearch()
     {
+        searchDelay.Stop();
+        if (!settingSearch && !query.IsComposing)
+            searchDelay.Start();
+    }
+
+    private void OpenItem(int id, string searchText)
+    {
+        settingSearch = true;
+        try
+        {
+            filter.SelectedIndex = 1;
+            query.Text = searchText;
+        }
+        finally
+        {
+            settingSearch = false;
+        }
+        RefreshResults(id);
+        results.Focus();
+    }
+
+    private void RefreshResults(int? selectedId = null)
+    {
+        searchDelay.Stop();
+        if (query.IsComposing)
+            return;
         var found = catalog.Find(query.Text, Filters[filter.SelectedIndex]);
+        bindingResults = true;
         results.BeginUpdate();
         try
         {
             results.Items.Clear();
             results.Items.AddRange(found.Cast<object>().ToArray());
-            results.SelectedIndex = found.Count == 0 ? -1 : 0;
+            int selected = 0;
+            if (selectedId.HasValue)
+            {
+                for (int i = 0; i < found.Count; i++)
+                    if (found[i].ItemId == selectedId)
+                    {
+                        selected = i;
+                        break;
+                    }
+            }
+            results.SelectedIndex = found.Count == 0 ? -1 : selected;
         }
         finally
         {
             results.EndUpdate();
+            bindingResults = false;
         }
         count.Text = $"{found.Count:N0}개 결과";
         SelectEntry();
@@ -841,6 +900,9 @@ internal sealed class Overlay : Form
     {
         if (bindingRecipes)
             return;
+        bool showLinks = showingRecipeUses && recipeUses.Count > 0;
+        details.Visible = !showLinks;
+        recipeUseLinks.Visible = showLinks;
         if (results.SelectedItem is not Entry entry)
         {
             recipeUsesToggle.Visible = false;
@@ -870,23 +932,15 @@ internal sealed class Overlay : Form
         var document = new DetailDocument();
         if (showingRecipeUses)
         {
+            if (showLinks)
+            {
+                ShowRecipeUseLinks();
+                return;
+            }
             document.Heading($"사용되는 제작법 ({recipeUses.Count:N0}개)");
-            if (recipeUses.Count == 0)
-            {
-                document.Body(catalog.RecipeBuild.Length == 0
-                    ? "Steam 제작법을 불러오면 재료가 사용되는 제작법을 확인할 수 있습니다."
-                    : "불러온 제작법에서 이 아이템을 소모하는 항목을 찾지 못했습니다.");
-            }
-            else
-            {
-                foreach (var product in recipeUses.GroupBy(use => use.Product))
-                {
-                    document.Step(product.Key.Title, string.Join("\n", product.Select(use =>
-                        $"{use.Choice.Label} · 회당 {use.PerBatch:0.######}개" +
-                        (use.Choice.Batch is null ? " · 산출물 미확인" : ""))));
-                }
-                document.Note("설치된 기본 게임에서 이 아이템이 직접 소모되는 제작법입니다.");
-            }
+            document.Body(catalog.RecipeBuild.Length == 0
+                ? "Steam 제작법을 불러오면 재료가 사용되는 제작법을 확인할 수 있습니다."
+                : "불러온 제작법에서 이 아이템을 소모하는 항목을 찾지 못했습니다.");
             RenderDetails(document);
             return;
         }
@@ -945,6 +999,49 @@ internal sealed class Overlay : Form
             document.Note($"제작법 출처  {choice.Source}");
         document.Note($"출처  {entry.Source}");
         RenderDetails(document);
+    }
+
+    private void ShowRecipeUseLinks()
+    {
+        recipeUseLinks.SuspendLayout();
+        try
+        {
+            while (recipeUseLinks.Controls.Count > 0)
+                recipeUseLinks.Controls[0].Dispose();
+            recipeUseLinks.AutoScrollPosition = Point.Empty;
+            var heading = Caption($"사용되는 제작법 ({recipeUses.Count:N0}개)", Accent);
+            heading.Margin = new Padding(0, 4, 0, 12);
+            recipeUseLinks.Controls.Add(heading);
+            foreach (var group in recipeUses.GroupBy(use => use.Product))
+            {
+                Entry product = group.Key;
+                var link = new LinkLabel
+                {
+                    Text = product.Title, AutoSize = true, LinkColor = Accent, ActiveLinkColor = Ink,
+                    VisitedLinkColor = Accent, Margin = Padding.Empty
+                };
+                link.LinkClicked += (_, _) => OpenItem(product.ItemId!.Value, product.Title);
+                recipeUseLinks.Controls.Add(link);
+                var variants = Caption(string.Join("\n", group.Select(use =>
+                    $"{use.Choice.Label} · 회당 {use.PerBatch:0.######}개" +
+                    (use.Choice.Batch is null ? " · 산출물 미확인" : ""))));
+                variants.Margin = new Padding(8, 2, 0, 9);
+                recipeUseLinks.Controls.Add(variants);
+            }
+            recipeUseLinks.Controls.Add(Caption("설치된 기본 게임에서 이 아이템이 직접 소모되는 제작법입니다."));
+            FitRecipeUseLinks();
+        }
+        finally
+        {
+            recipeUseLinks.ResumeLayout();
+        }
+    }
+
+    private void FitRecipeUseLinks()
+    {
+        int width = Math.Max(1, recipeUseLinks.ClientSize.Width - SystemInformation.VerticalScrollBarWidth - 8);
+        foreach (Control row in recipeUseLinks.Controls)
+            row.MaximumSize = new Size(width, 0);
     }
 
     private void RenderDetails(DetailDocument document)
@@ -1034,6 +1131,8 @@ internal sealed class Overlay : Form
             updatePopup.HandleKey(keyData);
             return true;
         }
+        if (query.Focused && query.IsComposing)
+            return base.ProcessCmdKey(ref msg, keyData);
         if (keyData == Keys.Escape && !filter.DroppedDown && !recipeSelector.DroppedDown)
         {
             HidePanel();
@@ -1099,6 +1198,7 @@ internal sealed class Overlay : Form
         tray.Dispose();
         menu.Dispose();
         hints.Dispose();
+        searchDelay.Dispose();
         collectedFont.Dispose();
         base.OnFormClosed(e);
     }

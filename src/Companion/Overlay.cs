@@ -37,6 +37,7 @@ internal sealed class Overlay : Form
     private readonly Button wishlistToggle = ActionButton("찜목록");
     private readonly Button sizeToggle = ActionButton("작게");
     private readonly Button saveGoal = ActionButton("목표 저장");
+    private readonly Button recipeUsesToggle = ActionButton("사용되는 제작법");
     private readonly Button prepareRecipes = ActionButton(PrepareLabel);
     private readonly Button checkUpdate = ActionButton("업데이트 확인");
     private readonly UpdatePopup updatePopup;
@@ -67,6 +68,8 @@ internal sealed class Overlay : Form
     private Control wishlistView = null!;
     private WishlistState wishlist = WishlistState.Empty;
     private bool bindingRecipes;
+    private bool showingRecipeUses;
+    private IReadOnlyList<RecipeUse> recipeUses = [];
     private bool wishlistUnreadable;
     private bool showingWishlist;
     private bool bindingMaterials;
@@ -149,6 +152,11 @@ internal sealed class Overlay : Form
         }
         wishlistToggle.Click += (_, _) => ToggleWishlist();
         saveGoal.Click += (_, _) => SaveGoal();
+        recipeUsesToggle.Click += (_, _) =>
+        {
+            showingRecipeUses = !showingRecipeUses;
+            ShowDetails();
+        };
         prepareRecipes.Visible = RecipePreparation.IsAvailable;
         prepareRecipes.Enabled = false;
         prepareRecipes.Click += async (_, _) => await PrepareRecipesAsync();
@@ -176,6 +184,8 @@ internal sealed class Overlay : Form
         results.SelectedIndexChanged += (_, _) => SelectEntry();
         recipeSelector.SelectedIndexChanged += (_, _) =>
         {
+            if (!bindingRecipes)
+                showingRecipeUses = false;
             if (!bindingRecipes && recipeSelector.SelectedIndex > 0 &&
                 results.SelectedItem is Entry { ItemId: int id })
             {
@@ -485,7 +495,12 @@ internal sealed class Overlay : Form
         details.Dock = DockStyle.Fill;
         detailPanel.Controls.Add(title, 0, 0);
         detailPanel.Controls.Add(metadata, 0, 1);
-        detailPanel.Controls.Add(recipeSelector, 0, 2);
+        var detailActions = new TableLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, ColumnCount = 2, Margin = Padding.Empty };
+        detailActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        detailActions.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        detailActions.Controls.Add(recipeSelector, 0, 0);
+        detailActions.Controls.Add(recipeUsesToggle, 1, 0);
+        detailPanel.Controls.Add(detailActions, 0, 2);
         detailPanel.Controls.Add(details, 0, 3);
         calculation.Controls.Add(Caption("목표 수량"));
         calculation.Controls.Add(target);
@@ -793,7 +808,11 @@ internal sealed class Overlay : Form
         try
         {
             recipeSelector.Items.Clear();
-            int? id = (results.SelectedItem as Entry)?.ItemId;
+            var selected = results.SelectedItem as Entry;
+            int? id = selected?.ItemId;
+            recipeUses = selected is { Category: Category.Item, ItemId: int ingredientId }
+                ? catalog.RecipeUses(ingredientId) : [];
+            showingRecipeUses = recipeUses.Count > 0 && selected?.Recipes is not { Length: > 0 };
             target.Value = wishlist.Goals.FirstOrDefault(goal => goal.Id == id)?.Quantity ?? 1;
             saveGoal.Text = wishlist.Goals.Any(goal => goal.Id == id) ? "목표 수정" : "목표 저장";
             if (results.SelectedItem is Entry { Recipes: { Length: > 0 } choices } entry)
@@ -824,6 +843,7 @@ internal sealed class Overlay : Form
             return;
         if (results.SelectedItem is not Entry entry)
         {
+            recipeUsesToggle.Visible = false;
             calculation.Visible = false;
             title.Text = "검색 결과 없음";
             metadata.Text = "";
@@ -836,7 +856,10 @@ internal sealed class Overlay : Form
             ? choices[choiceIndex] : null;
         var batch = choice is null ? entry.Batch : choice.Batch;
         bool canSaveGoal = entry.Category == Category.Item && entry.ItemId.HasValue;
-        calculation.Visible = canSaveGoal || batch is not null;
+        recipeUsesToggle.Visible = canSaveGoal;
+        recipeUsesToggle.Text = showingRecipeUses ? "아이템 상세" : recipeUses.Count > 0
+            ? $"사용되는 제작법 {recipeUses.Count:N0}개" : "사용되는 제작법";
+        calculation.Visible = !showingRecipeUses && (canSaveGoal || batch is not null);
         saveGoal.Visible = canSaveGoal;
         title.Text = entry.Title;
         metadata.Text = entry.ItemId is int id
@@ -845,6 +868,28 @@ internal sealed class Overlay : Form
         string aliases = string.Join("  ·  ", new[] { entry.English, entry.Chinese, entry.ChineseAlias }
             .Where(name => name.Length > 0).Distinct());
         var document = new DetailDocument();
+        if (showingRecipeUses)
+        {
+            document.Heading($"사용되는 제작법 ({recipeUses.Count:N0}개)");
+            if (recipeUses.Count == 0)
+            {
+                document.Body(catalog.RecipeBuild.Length == 0
+                    ? "Steam 제작법을 불러오면 재료가 사용되는 제작법을 확인할 수 있습니다."
+                    : "불러온 제작법에서 이 아이템을 소모하는 항목을 찾지 못했습니다.");
+            }
+            else
+            {
+                foreach (var product in recipeUses.GroupBy(use => use.Product))
+                {
+                    document.Step(product.Key.Title, string.Join("\n", product.Select(use =>
+                        $"{use.Choice.Label} · 회당 {use.PerBatch:0.######}개" +
+                        (use.Choice.Batch is null ? " · 산출물 미확인" : ""))));
+                }
+                document.Note("설치된 기본 게임에서 이 아이템이 직접 소모되는 제작법입니다.");
+            }
+            RenderDetails(document);
+            return;
+        }
         if (choice is not null)
         {
             document.Heading("제작 방법");
@@ -899,6 +944,11 @@ internal sealed class Overlay : Form
         if (choice is not null)
             document.Note($"제작법 출처  {choice.Source}");
         document.Note($"출처  {entry.Source}");
+        RenderDetails(document);
+    }
+
+    private void RenderDetails(DetailDocument document)
+    {
         details.Rtf = document.ToString();
         details.Select(0, 0);
         details.ScrollToCaret();

@@ -1,10 +1,12 @@
-param([string]$FixtureVersion)
+param([string]$FixtureVersion, [switch]$Local)
 
 $ErrorActionPreference = 'Stop'
 Push-Location (Split-Path -Parent $PSScriptRoot)
 try {
     $runtime = '8.0.33'
     $artifacts = Join-Path (Get-Location) 'artifacts'
+    if ($Local -and $FixtureVersion) { throw 'Choose either Local or FixtureVersion.' }
+    if ($Local) { $artifacts = Join-Path $artifacts 'local' }
     $publishOptions = @('-p:UpdateFixture=false')
     if ($FixtureVersion) {
         $version = $FixtureVersion

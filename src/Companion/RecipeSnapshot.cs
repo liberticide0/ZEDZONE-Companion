@@ -17,24 +17,32 @@ internal sealed record LocalRecipe([property: JsonRequired] int OutputId, int Ou
     };
 }
 internal sealed record ResearchUnlock(string Name, bool Default, string[] Prerequisites);
+internal sealed record ResearchNode(int Id, string Korean, string English, int Cost, bool Default,
+    int[] Prerequisites, int[] Craft, int[] Construction)
+{
+    public string Name => Korean.Length > 0 ? Korean : English.Length > 0 ? English : $"연구 ID {Id}";
+}
 internal sealed record RecipeAsset([property: JsonRequired] int Id, string Korean, string English,
-    [property: JsonRequired] bool DefaultUnlock, LocalRecipe[] Recipes, ResearchUnlock[]? Research = null);
+    [property: JsonRequired] bool DefaultUnlock, LocalRecipe[] Recipes, ResearchUnlock[]? Research = null,
+    string[]? Facts = null, string[]? Acquisition = null);
 internal sealed record RecipeChoice(string Label, string Details, string Source, RecipeBatch? Batch,
     string Station, Material[]? Tools = null, Material[]? ListedInputs = null);
 
 internal sealed class RecipeSnapshot
 {
     private sealed record GuideAsset(string Category, string Korean, string English, string Chinese, int TextId, string Details);
-    private sealed record SnapshotFile(int Schema, string Build, RecipeAsset[] Items, GuideAsset[]? Guides);
+    private sealed record SnapshotFile(int Schema, string Build, RecipeAsset[] Items, GuideAsset[]? Guides,
+        ResearchNode[]? Research);
     private static readonly JsonSerializerOptions Options = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     private readonly Dictionary<int, RecipeAsset> items;
     private readonly Dictionary<int, RecipeChoice[]> choices;
 
-    private RecipeSnapshot(string build, Dictionary<int, RecipeAsset> items, Entry[] guides)
+    private RecipeSnapshot(string build, Dictionary<int, RecipeAsset> items, Entry[] guides, ResearchNode[] research)
     {
         Build = build;
         this.items = items;
         Guides = guides;
+        Research = research;
         choices = items.Values.Where(item => item.Recipes.Length > 0)
             .ToDictionary(item => item.Id, item => item.Recipes.Select((recipe, index) =>
                 Describe(item, recipe, index + 1)).ToArray());
@@ -43,6 +51,7 @@ internal sealed class RecipeSnapshot
     public string Build { get; }
     public int VariantCount => choices.Values.Sum(rows => rows.Length);
     public Entry[] Guides { get; }
+    public ResearchNode[] Research { get; }
     public IEnumerable<RecipeAsset> Items => items.Values;
     public RecipeChoice[] For(int id) => choices.TryGetValue(id, out var rows) ? rows : [];
 
@@ -100,6 +109,8 @@ internal sealed class RecipeSnapshot
                 "map" => Category.Map,
                 "boss" => Category.Boss,
                 "construction" => Category.Construction,
+                "effect" => Category.Effect,
+                "trait" => Category.Trait,
                 _ => (Category?)null
             };
             if (category is { } kind)
@@ -108,13 +119,19 @@ internal sealed class RecipeSnapshot
                 {
                     Category.Boss => "몬스터 자산",
                     Category.Construction => "배치물 자산",
+                    Category.Effect => "상태 효과 자산",
+                    Category.Trait => "특성 자산",
                     _ => "현지화 ID"
                 };
                 guides.Add(new Entry(kind, guide.Korean, guide.English, guide.Chinese, guide.Details,
-                    $"로컬 Steam 빌드 {data.Build} · {source} {guide.TextId}"));
+                    $"로컬 Steam 빌드 {data.Build} · {source} {guide.TextId}", GuideId: guide.TextId));
             }
         }
-        return new RecipeSnapshot(data.Build, assets, guides.ToArray());
+        var research = (data.Research ?? [])
+            .Where(node => node is { Id: > 0, Korean: not null, English: not null, Cost: >= 0,
+                Prerequisites: not null, Craft: not null, Construction: not null })
+            .DistinctBy(node => node.Id).ToArray();
+        return new RecipeSnapshot(data.Build, assets, guides.ToArray(), research);
     }
 
     private string Name(int id)

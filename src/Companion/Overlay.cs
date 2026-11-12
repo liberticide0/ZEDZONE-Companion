@@ -12,7 +12,8 @@ internal sealed class Overlay : Form
     private static readonly Color Surface = Color.FromArgb(28, 39, 35);
     private static readonly Color Accent = Color.FromArgb(164, 223, 170);
     private static readonly Category?[] Filters =
-        [null, Category.Item, Category.Recipe, Category.Skill, Category.Map, Category.Boss, Category.Construction];
+        [null, Category.Item, Category.Recipe, Category.Skill, Category.Map, Category.Boss, Category.Construction,
+            Category.Research, Category.Effect, Category.Trait];
 
     private readonly Catalog catalog = new();
     private readonly System.Windows.Forms.Timer searchDelay = new() { Interval = 500 };
@@ -94,6 +95,11 @@ internal sealed class Overlay : Form
         BackColor = Surface, ForeColor = Ink, BorderStyle = BorderStyle.None, ScrollBars = RichTextBoxScrollBars.Vertical
     };
     private readonly Panel detailBody = new() { Dock = DockStyle.Fill };
+    private readonly ComboBox researchLinks = new()
+    {
+        AccessibleName = "연구 경로 이동", DropDownStyle = ComboBoxStyle.DropDownList,
+        Dock = DockStyle.Fill, BackColor = Surface, ForeColor = Ink, Visible = false
+    };
     private readonly FlowLayoutPanel recipeUseLinks = new()
     {
         Dock = DockStyle.Fill, AutoScroll = true, FlowDirection = FlowDirection.TopDown,
@@ -200,6 +206,11 @@ internal sealed class Overlay : Form
         {
             if (!bindingResults)
                 SelectEntry();
+        };
+        researchLinks.SelectionChangeCommitted += (_, _) =>
+        {
+            if (researchLinks.SelectedItem is RelatedEntry link)
+                OpenEntry(link.Entry.Category, link.Entry.ItemId ?? link.Entry.GuideId, link.Entry.Title);
         };
         recipeSelector.SelectedIndexChanged += (_, _) =>
         {
@@ -473,7 +484,7 @@ internal sealed class Overlay : Form
         searchRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         searchRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         query.Dock = DockStyle.Fill;
-        filter.Items.AddRange(["전체", "아이템", "제작법", "스킬", "지도", "보스", "건설"]);
+        filter.Items.AddRange(["전체", "아이템", "제작법", "스킬", "지도", "보스", "건설", "연구", "상태 효과", "특성"]);
         filter.SelectedIndex = 0;
         var import = ActionButton(ImportLabel);
         import.AccessibleDescription = ImportHint;
@@ -498,7 +509,8 @@ internal sealed class Overlay : Form
         results.DrawItem += DrawResult;
         results.Resize += (_, _) => results.Invalidate();
         panes.Controls.Add(results, 0, 0);
-        var detailPanel = new TableLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty, Padding = new Padding(13), BackColor = Surface, ColumnCount = 1, RowCount = 5 };
+        var detailPanel = new TableLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty, Padding = new Padding(13), BackColor = Surface, ColumnCount = 1, RowCount = 6 };
+        detailPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         detailPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         detailPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         detailPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -523,11 +535,12 @@ internal sealed class Overlay : Form
         detailBody.Controls.Add(details);
         detailBody.Controls.Add(recipeUseLinks);
         recipeUseLinks.SizeChanged += (_, _) => FitRecipeUseLinks();
-        detailPanel.Controls.Add(detailBody, 0, 3);
+        detailPanel.Controls.Add(researchLinks, 0, 3);
+        detailPanel.Controls.Add(detailBody, 0, 4);
         calculation.Controls.Add(Caption("목표 수량"));
         calculation.Controls.Add(target);
         calculation.Controls.Add(saveGoal);
-        detailPanel.Controls.Add(calculation, 0, 4);
+        detailPanel.Controls.Add(calculation, 0, 5);
         detailView = detailPanel;
         wishlistView = BuildWishlist();
         side.Controls.Add(detailView);
@@ -812,12 +825,14 @@ internal sealed class Overlay : Form
             searchDelay.Start();
     }
 
-    private void OpenItem(int id, string searchText)
+    private void OpenItem(int id, string searchText) => OpenEntry(Category.Item, id, searchText);
+
+    private void OpenEntry(Category category, int? id, string searchText)
     {
         settingSearch = true;
         try
         {
-            filter.SelectedIndex = 1;
+            filter.SelectedIndex = Array.IndexOf(Filters, category);
             query.Text = searchText;
         }
         finally
@@ -844,7 +859,7 @@ internal sealed class Overlay : Form
             if (selectedId.HasValue)
             {
                 for (int i = 0; i < found.Count; i++)
-                    if (found[i].ItemId == selectedId)
+                    if ((found[i].ItemId ?? found[i].GuideId) == selectedId)
                     {
                         selected = i;
                         break;
@@ -869,6 +884,15 @@ internal sealed class Overlay : Form
             recipeSelector.Items.Clear();
             var selected = results.SelectedItem as Entry;
             int? id = selected?.ItemId;
+            researchLinks.Items.Clear();
+            if (selected is not null)
+                researchLinks.Items.AddRange(catalog.RelatedResearch(selected).Cast<object>().ToArray());
+            researchLinks.Visible = researchLinks.Items.Count > 0;
+            if (researchLinks.Items.Count > 0)
+            {
+                researchLinks.Items.Insert(0, "연구 경로 이동");
+                researchLinks.SelectedIndex = 0;
+            }
             recipeUses = selected is { Category: Category.Item, ItemId: int ingredientId }
                 ? catalog.RecipeUses(ingredientId) : [];
             showingRecipeUses = recipeUses.Count > 0 && selected?.Recipes is not { Length: > 0 };
@@ -909,7 +933,9 @@ internal sealed class Overlay : Form
             calculation.Visible = false;
             title.Text = "검색 결과 없음";
             metadata.Text = "";
-            details.Text = "검색어를 줄이거나 분류를 전체로 바꿔 보세요.";
+            details.Text = Filters[filter.SelectedIndex] == Category.Research && !catalog.HasResearch
+                ? "Steam 제작법을 다시 불러오면 연구 비용과 해금 경로를 검색할 수 있습니다."
+                : "검색어를 줄이거나 분류를 전체로 바꿔 보세요.";
             return;
         }
 
@@ -981,7 +1007,7 @@ internal sealed class Overlay : Form
             });
             if (aliases.Length > 0)
                 document.Aliases(aliases);
-            if (entry.Category == Category.Construction)
+            if (entry.Category is Category.Construction or Category.Research or Category.Effect or Category.Trait or Category.Boss or Category.Skill)
             {
                 foreach (string line in entry.Details.Split('\n'))
                 {
@@ -994,6 +1020,23 @@ internal sealed class Overlay : Form
             }
             else if (entry.Details.Length > 0)
                 document.Body(entry.Details);
+        }
+        if (entry.Facts is { Length: > 0 })
+        {
+            document.Heading("아이템 속성");
+            foreach (string line in entry.Facts)
+            {
+                if (line?.Split("  ", 2, StringSplitOptions.None) is [var label, var value])
+                    document.Field(label, value);
+            }
+        }
+        if (entry.Acquisition is { Length: > 0 })
+        {
+            document.Heading("재료 획득처");
+            document.Note("고정 목록과 확률은 자산에 기록된 값입니다. 월드 조건과 실제 지급 여부는 미검증입니다.");
+            foreach (string line in entry.Acquisition)
+                if (line?.Split("  ", 2, StringSplitOptions.None) is [var label, var value])
+                    document.Field(label, value);
         }
         if (choice is not null)
             document.Note($"제작법 출처  {choice.Source}");
@@ -1133,7 +1176,7 @@ internal sealed class Overlay : Form
         }
         if (query.Focused && query.IsComposing)
             return base.ProcessCmdKey(ref msg, keyData);
-        if (keyData == Keys.Escape && !filter.DroppedDown && !recipeSelector.DroppedDown)
+        if (keyData == Keys.Escape && !filter.DroppedDown && !recipeSelector.DroppedDown && !researchLinks.DroppedDown)
         {
             HidePanel();
             return true;

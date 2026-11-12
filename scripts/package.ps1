@@ -1,22 +1,28 @@
-param([string]$FixtureVersion, [switch]$Local)
+param([string]$FixtureVersion, [string]$LocalVersion)
 
 $ErrorActionPreference = 'Stop'
 Push-Location (Split-Path -Parent $PSScriptRoot)
 try {
     $runtime = '8.0.33'
     $artifacts = Join-Path (Get-Location) 'artifacts'
-    if ($Local -and $FixtureVersion) { throw 'Choose either Local or FixtureVersion.' }
-    if ($Local) { $artifacts = Join-Path $artifacts 'local' }
+    if ($LocalVersion -and $FixtureVersion) { throw 'Choose either LocalVersion or FixtureVersion.' }
     $publishOptions = @('-p:UpdateFixture=false')
     if ($FixtureVersion) {
         $version = $FixtureVersion
         $artifacts = Join-Path $artifacts 'update-popup-fixtures'
         $publishOptions = @('-p:UpdateFixture=true', "-p:Version=$version")
+    } elseif ($LocalVersion) {
+        if ($LocalVersion -notmatch '^\d+\.\d+\.\d+-[1-9]\d*$') { throw 'Use X.Y.Z-N for a local build.' }
+        $version = $LocalVersion
+        $artifacts = Join-Path $artifacts 'local'
+        $publishOptions = @('-p:UpdateFixture=false', '-p:LocalBuild=true', "-p:Version=$version")
     } else {
         $version = (dotnet msbuild src/Companion -nologo -getProperty:Version).Trim()
         if ($LASTEXITCODE -ne 0) { throw 'Cannot read the app version.' }
     }
-    if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid app version.' }
+    if (!$LocalVersion -and $version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid app version.' }
+    $zip = Join-Path $artifacts "ZEDZONE-Companion-$version-win-x64.zip"
+    if ($LocalVersion -and (Test-Path -LiteralPath $zip)) { throw 'Local ZIP already exists. Increase the local build number.' }
     $staging = Join-Path $artifacts "staging-$version"
     dotnet publish src/Companion -c Release -r win-x64 --self-contained true `
         "-p:RuntimeFrameworkVersion=$runtime" -p:PublishSingleFile=true `
@@ -62,7 +68,6 @@ try {
     }
     Copy-Item -LiteralPath scripts/converter-bootstrap.py, scripts/converter-packages.json, scripts/probe-icons.py -Destination $converter
     Copy-Item -LiteralPath README.md, LICENSE, scripts/probe-recipes.py -Destination $staging
-    $zip = Join-Path $artifacts "ZEDZONE-Companion-$version-win-x64.zip"
     $contents = 'ZEDZONE.Companion.exe', 'README.md', 'LICENSE', 'probe-recipes.py', 'dotnet-notices', 'converter' |
         ForEach-Object { Join-Path $staging $_ }
     Compress-Archive -LiteralPath $contents -DestinationPath $zip -Force

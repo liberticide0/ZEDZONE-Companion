@@ -13,4 +13,7 @@
   <PropertyGroup Condition="'$(UpdateFixture)' == 'true'">
     <DefineConstants>$(DefineConstants);UPDATE_FIXTURE</DefineConstants>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(LocalBuild)' == 'true'">
+    <DefineConstants>$(DefineConstants);LOCAL_BUILD</DefineConstants>
+  </PropertyGroup>
 </Project>

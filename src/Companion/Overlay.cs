@@ -2,7 +2,13 @@ namespace Companion;
 
 internal sealed class Overlay : Form
 {
-    private const string AppTitle = "ZED ZONE Companion" + UpdateFixture.TitleSuffix;
+    private static readonly string AppTitle = "ZED ZONE Companion" + UpdateFixture.TitleSuffix
+#if LOCAL_BUILD
+        + " " + ((System.Reflection.AssemblyInformationalVersionAttribute?)Attribute.GetCustomAttribute(
+            typeof(Overlay).Assembly, typeof(System.Reflection.AssemblyInformationalVersionAttribute)))
+            ?.InformationalVersion.Split('+')[0]
+#endif
+        ;
     private const string PrepareLabel = "Steam 제작법 불러오기";
     private const string ImportLabel = "자료 파일 가져오기";
     private const string PrepareHint = "설치된 ZED ZONE에서 제작법을 읽습니다. Steam 업데이트 후 다시 실행하세요.";

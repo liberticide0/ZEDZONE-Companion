@@ -17,12 +17,22 @@ internal static class RecipeSmoke
                  "materials":[{"id":3,"quantity":1}]},
                 {"outputId":10701,"output":1,"platform":2,"toolType":0,"intelligence":0,"crafting":0,"difficulty":0,
                  "materials":[{"id":3,"quantity":1}]}]},
-              {"id":2,"korean":"예제 재료","english":"Example Input","defaultUnlock":true,"recipes":[]},
+              {"id":2,"korean":"예제 재료","english":"Example Input","defaultUnlock":true,"recipes":[],
+               "facts":["스택 한도  20개"],"acquisition":["전리품 · 확률  예제 몬스터 · 자산 확률값 25%"]},
               {"id":3,"korean":"예제 도구","english":"Example Tool","defaultUnlock":true,"recipes":[]}
             ],"guides":[{"category":"skill","korean":"예제 스킬","english":"Example Skill","chinese":"",
                          "textId":77,"details":"예제 설명"},
                         {"category":"construction","korean":"예제 건물","english":"Example Building","chinese":"",
-                         "textId":1,"details":"필요 재료  예제 재료 × 3"}]}
+                         "textId":1,"details":"필요 재료  예제 재료 × 3"},
+                        {"category":"effect","korean":"예제 효과","english":"Example Effect","chinese":"",
+                         "textId":1,"details":"초당 수분  +5"},
+                        {"category":"trait","korean":"예제 특성","english":"Example Trait","chinese":"",
+                         "textId":1,"details":"상태  비활성"}],
+             "research":[
+                {"id":1,"korean":"기초 연구","english":"Foundation","cost":0,"default":true,
+                 "prerequisites":[],"craft":[],"construction":[]},
+                {"id":2,"korean":"예제 연구","english":"Example Research","cost":6,"default":false,
+                 "prerequisites":[1],"craft":[1],"construction":[1]}]}
             """;
 
         using var data = new MemoryStream(Encoding.UTF8.GetBytes(fixture));
@@ -44,6 +54,10 @@ internal static class RecipeSmoke
         check(!press.Partial && press.Calculate(7).Output == 12 && press.Calculate(7).Materials.Single().PerBatch == 4,
             "alternative station uses its own production yield");
         var uses = catalog.RecipeUses(2);
+        check(catalog.Item(2) is { Facts: ["스택 한도  20개"], Acquisition: [var source] } &&
+            source.Contains("25%") && catalog.Find("예제 효과", Category.Effect).Single().Details.Contains("+5") &&
+            catalog.Find("예제 특성", Category.Trait).Single().Details.Contains("비활성"),
+            "item facts, acquisition source, effects and traits survive snapshot loading");
         check(uses.Count == 2 && uses.All(use => use.Product.ItemId == 1) &&
             uses[0].Choice.Station == "손 제작" && uses[0].PerBatch == 1.25m &&
             uses[1].Choice.Station == "탄약 압착기" && uses[1].PerBatch == 2,
@@ -65,10 +79,16 @@ internal static class RecipeSmoke
             building.Details.Contains("예제 재료 × 3") && ReferenceEquals(item, catalog.Item(1)) &&
             ReferenceEquals(building, catalog.Find("예제 건물", Category.Recipe).Single()),
             "construction uses separate IDs and appears in both construction and recipe searches");
+        var research = catalog.Find("예제 연구", Category.Research).Single();
+        check(research.Details.Contains("6점") && research.Details.Contains("기초 연구") &&
+            catalog.RelatedResearch(research).Count() == 3 &&
+            ReferenceEquals(catalog.RelatedResearch(item).Single().Entry, research) &&
+            ReferenceEquals(catalog.RelatedResearch(building).Single().Entry, research),
+            "research costs, prerequisites and category-specific unlocks resolve in both directions");
 
         var conflicting = new Catalog();
         conflicting.UseSteamLocalization(([local[0] with { English = "Different English Name" }], "42"), snapshot);
-        var unified = conflicting.Find("예제 탄약", null).Single();
+        var unified = conflicting.Find("예제 탄약", Category.Item).Single();
         check(unified is { English: "Example Ammo", Recipes.Length: 4 } &&
             ReferenceEquals(unified, conflicting.Find("Different English Name", Category.Item).Single()) &&
             unified.Details.Contains("제작법 연결에서 제외"),

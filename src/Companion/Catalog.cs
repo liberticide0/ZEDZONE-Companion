@@ -4,12 +4,13 @@ using Microsoft.VisualBasic.FileIO;
 
 namespace Companion;
 
-internal enum Category { Item, Recipe, Skill, Map, Boss, Construction }
+internal enum Category { Item, Recipe, Skill, Map, Boss, Construction, Research, Effect, Trait }
 
 internal sealed record Entry(
     Category Category, string Korean, string English, string Chinese, string Details, string Source,
     int? ItemId = null, RecipeBatch? Batch = null, bool InferredId = false, string ChineseAlias = "",
-    RecipeChoice[]? Recipes = null, bool VerifiedAsset = false)
+    RecipeChoice[]? Recipes = null, bool VerifiedAsset = false, int? GuideId = null, string[]? Facts = null,
+    string[]? Acquisition = null)
 {
     public string Title => Korean.Length > 0 ? Korean : English.Length > 0 ? English : Chinese;
     public string CategoryName => Category switch
@@ -20,6 +21,9 @@ internal sealed record Entry(
         Category.Map => "지도",
         Category.Boss => "보스",
         Category.Construction => "건설",
+        Category.Research => "연구",
+        Category.Effect => "효과",
+        Category.Trait => "특성",
         _ => ""
     };
     public override string ToString() => $"{Title} ({CategoryName})";
@@ -27,6 +31,10 @@ internal sealed record Entry(
 
 internal sealed record Material(string Name, decimal PerBatch, int? Id = null);
 internal sealed record RecipeUse(Entry Product, RecipeChoice Choice, decimal PerBatch);
+internal sealed record RelatedEntry(string Relation, Entry Entry)
+{
+    public override string ToString() => $"{Relation} · {Entry.Title}";
+}
 
 internal sealed record RecipeBatch(int Output, Material[] Materials, bool Partial = true)
 {
@@ -52,6 +60,7 @@ internal sealed class Catalog
     private SearchDocument[] searchIndex = [];
     private sealed record SearchDocument(Entry Entry, string[] Names, string Id, string Details);
     public string RecipeBuild => recipeSnapshot?.Build ?? "";
+    public bool HasResearch => recipeSnapshot?.Research.Length > 0;
 
     public Entry? Item(int id)
     {
@@ -63,6 +72,36 @@ internal sealed class Catalog
     {
         _ = Entries();
         return usesByIngredient[ingredientId].ToArray();
+    }
+
+    public IEnumerable<RelatedEntry> RelatedResearch(Entry selected)
+    {
+        var all = Entries();
+        var nodes = recipeSnapshot?.Research ?? [];
+        if (selected.Category == Category.Research && nodes.FirstOrDefault(node => node.Id == selected.GuideId) is { } research)
+        {
+            foreach (var entry in all)
+            {
+                if (entry.Category == Category.Research && entry.GuideId is int researchId)
+                {
+                    if (research.Prerequisites.Contains(researchId))
+                        yield return new("선행 연구", entry);
+                    if (nodes.Any(node => node.Id == researchId && node.Prerequisites.Contains(research.Id)))
+                        yield return new("후속 연구", entry);
+                }
+                else if (entry.Category == Category.Item && entry.ItemId is int itemId && research.Craft.Contains(itemId))
+                    yield return new("해금 제작법", entry);
+                else if (entry.Category == Category.Construction && entry.GuideId is int buildingId && research.Construction.Contains(buildingId))
+                    yield return new("해금 건설물", entry);
+            }
+        }
+        else
+        {
+            foreach (var node in nodes)
+                if (selected.Category == Category.Item && selected.ItemId is int itemId && node.Craft.Contains(itemId) ||
+                    selected.Category == Category.Construction && selected.GuideId is int buildingId && node.Construction.Contains(buildingId))
+                    yield return new("해금 연구", all.Single(entry => entry.Category == Category.Research && entry.GuideId == node.Id));
+        }
     }
     public string DataStatus
     {
@@ -85,7 +124,7 @@ internal sealed class Catalog
             .GroupBy(entry => entry.ItemId!.Value)
             .ToDictionary(group => group.Key, group => MergeItem(group));
         entries = itemIndex.Values.Concat(raw.Where(entry => entry.Category is not (Category.Item or Category.Recipe)
-            || !entry.ItemId.HasValue)).ToArray();
+            || !entry.ItemId.HasValue)).Concat(ResearchEntries(raw)).ToArray();
         usesByIngredient = (from product in itemIndex.Values.OrderBy(entry => entry.Title, KoreanOrder)
                             from choice in product.Recipes ?? []
                             from input in choice.ListedInputs ?? choice.Batch?.Materials ?? []
@@ -94,10 +133,37 @@ internal sealed class Catalog
             .ToLookup(row => row.Id, row => row.Use);
         searchIndex = entries.Select(entry => new SearchDocument(entry,
             new[] { entry.Korean, entry.English, entry.Chinese, entry.ChineseAlias }.Select(Normalize).ToArray(),
-            entry.ItemId?.ToString(CultureInfo.InvariantCulture) ?? "",
+            (entry.ItemId ?? entry.GuideId)?.ToString(CultureInfo.InvariantCulture) ?? "",
             Normalize(string.Join("\n", new[] { entry.Details }.Concat((entry.Recipes ?? [])
                 .Select(recipe => $"{recipe.Station}\n{recipe.Details}")))))).ToArray();
         return entries;
+    }
+
+    private IEnumerable<Entry> ResearchEntries(Entry[] raw)
+    {
+        if (recipeSnapshot is not { } snapshot)
+            yield break;
+        var nodes = snapshot.Research.ToDictionary(node => node.Id);
+        var buildings = raw.Where(entry => entry.Category == Category.Construction && entry.GuideId.HasValue)
+            .ToLookup(entry => entry.GuideId!.Value);
+        foreach (var node in snapshot.Research)
+        {
+            var lines = new List<string>
+            {
+                $"연구 비용  {node.Cost:N0}점",
+                $"해금 상태  {(node.Default ? "기본 활성" : "연구 필요")}",
+                "선행 연구  " + (node.Prerequisites.Length == 0 ? "없음" :
+                    string.Join(", ", node.Prerequisites.Select(id => nodes.GetValueOrDefault(id)?.Name ?? $"미확인 연구 ID {id}")))
+            };
+            if (node.Craft.Length > 0)
+                lines.Add("해금 제작법  " + string.Join(", ", node.Craft.Select(id => itemIndex!.GetValueOrDefault(id)?.Title ?? $"미확인 아이템 ID {id}")));
+            if (node.Construction.Length > 0)
+                lines.Add("해금 건설물  " + string.Join(", ", node.Construction.Select(id => buildings[id].FirstOrDefault()?.Title ?? $"미확인 배치물 ID {id}")));
+            if (node.Craft.Length == 0 && node.Construction.Length == 0)
+                lines.Add("제작법·건설물 해금 목록이 자산에 비어 있습니다.");
+            yield return new Entry(Category.Research, node.Korean, node.English.Length > 0 ? node.English : node.Name,
+                "", string.Join("\n", lines), $"로컬 Steam 빌드 {snapshot.Build} · 활성 연구 노드 {node.Id}", GuideId: node.Id);
+        }
     }
 
     private static Entry MergeItem(IEnumerable<Entry> group)
@@ -134,7 +200,14 @@ internal sealed class Catalog
             }
             else
             {
-                yield return entry;
+                var match = entry.Category == Category.Boss ? recipeSnapshot?.Guides.FirstOrDefault(
+                    guide => guide.Category == Category.Boss && SameEnglishName(entry, guide)) : null;
+                yield return match is null ? entry : entry with
+                {
+                    GuideId = match.GuideId,
+                    Details = entry.Details + "\n\n" + match.Details,
+                    Source = entry.Source + " / " + match.Source
+                };
             }
         }
 
@@ -165,7 +238,8 @@ internal sealed class Catalog
                 var recipes = snapshot.For(asset.Id);
                 var fromAsset = new Entry(Category.Item, asset.Korean, asset.English, "",
                     "설치된 기본 게임의 아이템 자산입니다.", $"로컬 Steam 빌드 {snapshot.Build} · 아이템 자산",
-                    asset.Id, Recipes: recipes.Length > 0 ? recipes : null, VerifiedAsset: true);
+                    asset.Id, Recipes: recipes.Length > 0 ? recipes : null, VerifiedAsset: true, Facts: asset.Facts,
+                    Acquisition: asset.Acquisition);
                 if (fromAsset.Title.Length == 0)
                     fromAsset = fromAsset with { Korean = $"ID {asset.Id}" };
 
@@ -175,7 +249,7 @@ internal sealed class Catalog
                     (item.English.Length == 0 || fromAsset.English.Length == 0) &&
                     item.Korean.Length > 0 && Normalize(item.Korean) == Normalize(fromAsset.Korean))
                     items[asset.Id] = fromAsset = item with { InferredId = false, Recipes = fromAsset.Recipes, VerifiedAsset = true,
-                        Source = item.Source + " / 아이템 자산 ID 대조" };
+                        Source = item.Source + " / 아이템 자산 ID 대조", Facts = asset.Facts, Acquisition = asset.Acquisition };
                 else
                     yield return fromAsset;
 

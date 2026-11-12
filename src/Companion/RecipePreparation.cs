@@ -12,7 +12,8 @@ internal static class RecipePreparation
     public static bool IsAvailable => File.Exists(PythonPath) && File.Exists(ScriptPath) &&
         File.Exists(Path.Combine(DirectoryPath, "converter-packages.json"));
 
-    public static async Task<int> RunAsync(string game, bool allowDownload, CancellationToken cancellation)
+    public static async Task<int> RunAsync(string game, bool allowDownload, CancellationToken cancellation,
+        bool icons = false)
     {
         var start = new ProcessStartInfo
         {
@@ -27,6 +28,8 @@ internal static class RecipePreparation
         start.ArgumentList.Add("utf8");
         start.ArgumentList.Add(ScriptPath);
         start.ArgumentList.Add(game);
+        if (icons)
+            start.ArgumentList.Add("--icons");
         if (allowDownload)
             start.ArgumentList.Add("--allow-download");
 

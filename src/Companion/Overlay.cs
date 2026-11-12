@@ -2,7 +2,13 @@ namespace Companion;
 
 internal sealed class Overlay : Form
 {
-    private const string AppTitle = "ZED ZONE Companion" + UpdateFixture.TitleSuffix;
+    private static readonly string AppTitle = "ZED ZONE Companion" + UpdateFixture.TitleSuffix
+#if LOCAL_BUILD
+        + " " + ((System.Reflection.AssemblyInformationalVersionAttribute?)Attribute.GetCustomAttribute(
+            typeof(Overlay).Assembly, typeof(System.Reflection.AssemblyInformationalVersionAttribute)))
+            ?.InformationalVersion.Split('+')[0]
+#endif
+        ;
     private const string PrepareLabel = "Steam 제작법 불러오기";
     private const string ImportLabel = "자료 파일 가져오기";
     private const string PrepareHint = "설치된 ZED ZONE에서 제작법을 읽습니다. Steam 업데이트 후 다시 실행하세요.";
@@ -12,7 +18,8 @@ internal sealed class Overlay : Form
     private static readonly Color Surface = Color.FromArgb(28, 39, 35);
     private static readonly Color Accent = Color.FromArgb(164, 223, 170);
     private static readonly Category?[] Filters =
-        [null, Category.Item, Category.Recipe, Category.Skill, Category.Map, Category.Boss, Category.Construction];
+        [null, Category.Item, Category.Recipe, Category.Skill, Category.Map, Category.Boss, Category.Construction,
+            Category.Research, Category.Effect, Category.Trait];
 
     private readonly Catalog catalog = new();
     private readonly System.Windows.Forms.Timer searchDelay = new() { Interval = 500 };
@@ -36,6 +43,12 @@ internal sealed class Overlay : Form
     private readonly Label count = Caption("");
     private readonly Label status = Caption("");
     private readonly Label title = Caption("", Ink);
+    private readonly PictureBox itemIcon = new()
+    {
+        Size = new Size(42, 42), SizeMode = PictureBoxSizeMode.Zoom, Margin = new Padding(0, 0, 8, 0),
+        Visible = false
+    };
+    private string? iconPath;
     private readonly Label metadata = Caption("");
     private readonly Button wishlistToggle = ActionButton("찜목록");
     private readonly Button sizeToggle = ActionButton("작게");
@@ -94,6 +107,11 @@ internal sealed class Overlay : Form
         BackColor = Surface, ForeColor = Ink, BorderStyle = BorderStyle.None, ScrollBars = RichTextBoxScrollBars.Vertical
     };
     private readonly Panel detailBody = new() { Dock = DockStyle.Fill };
+    private readonly ComboBox researchLinks = new()
+    {
+        AccessibleName = "연구 경로 이동", DropDownStyle = ComboBoxStyle.DropDownList,
+        Dock = DockStyle.Fill, BackColor = Surface, ForeColor = Ink, Visible = false
+    };
     private readonly FlowLayoutPanel recipeUseLinks = new()
     {
         Dock = DockStyle.Fill, AutoScroll = true, FlowDirection = FlowDirection.TopDown,
@@ -201,6 +219,11 @@ internal sealed class Overlay : Form
             if (!bindingResults)
                 SelectEntry();
         };
+        researchLinks.SelectionChangeCommitted += (_, _) =>
+        {
+            if (researchLinks.SelectedItem is RelatedEntry link)
+                OpenEntry(link.Entry.Category, link.Entry.ItemId ?? link.Entry.GuideId, link.Entry.Title);
+        };
         recipeSelector.SelectedIndexChanged += (_, _) =>
         {
             if (!bindingRecipes)
@@ -301,6 +324,26 @@ internal sealed class Overlay : Form
             RefreshResults();
             RefreshWishlist();
             preparationStatus = null;
+            if (!Directory.Exists(ItemIconCache.DirectoryFor(recipes.Build)))
+            {
+                preparationStatus = "제작법 준비됨 · 아이콘 준비 중…";
+                UpdateStatus();
+                try
+                {
+                    await RecipePreparation.RunAsync(game, allowDownload: false, preparationLifetime.Token, icons: true);
+                }
+                catch (Exception error) when (Catalog.IsImportError(error) || error is System.ComponentModel.Win32Exception
+                    or TimeoutException or InvalidOperationException)
+                {
+                    // Recipe data has already been loaded, so icons can fail independently.
+                }
+                if (!IsDisposed && !Disposing)
+                {
+                    preparationStatus = null;
+                    iconPath = null;
+                    ShowItemIcon(results.SelectedItem as Entry);
+                }
+            }
         }
         catch (OperationCanceledException) when (preparationLifetime.IsCancellationRequested)
         {
@@ -473,7 +516,7 @@ internal sealed class Overlay : Form
         searchRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         searchRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         query.Dock = DockStyle.Fill;
-        filter.Items.AddRange(["전체", "아이템", "제작법", "스킬", "지도", "보스", "건설"]);
+        filter.Items.AddRange(["전체", "아이템", "제작법", "스킬", "지도", "보스", "건설", "연구", "상태 효과", "특성"]);
         filter.SelectedIndex = 0;
         var import = ActionButton(ImportLabel);
         import.AccessibleDescription = ImportHint;
@@ -498,7 +541,8 @@ internal sealed class Overlay : Form
         results.DrawItem += DrawResult;
         results.Resize += (_, _) => results.Invalidate();
         panes.Controls.Add(results, 0, 0);
-        var detailPanel = new TableLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty, Padding = new Padding(13), BackColor = Surface, ColumnCount = 1, RowCount = 5 };
+        var detailPanel = new TableLayoutPanel { Dock = DockStyle.Fill, Margin = Padding.Empty, Padding = new Padding(13), BackColor = Surface, ColumnCount = 1, RowCount = 6 };
+        detailPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         detailPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         detailPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         detailPanel.RowStyles.Add(new RowStyle(SizeType.AutoSize));
@@ -512,7 +556,13 @@ internal sealed class Overlay : Form
         metadata.ForeColor = Accent;
         metadata.Padding = new Padding(0, 0, 0, 9);
         details.Dock = DockStyle.Fill;
-        detailPanel.Controls.Add(title, 0, 0);
+        var titleRow = new TableLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, ColumnCount = 2, Margin = Padding.Empty };
+        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        titleRow.Controls.Add(itemIcon, 0, 0);
+        titleRow.Controls.Add(title, 1, 0);
+        title.TextAlign = ContentAlignment.MiddleLeft;
+        detailPanel.Controls.Add(titleRow, 0, 0);
         detailPanel.Controls.Add(metadata, 0, 1);
         var detailActions = new TableLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, ColumnCount = 2, Margin = Padding.Empty };
         detailActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -523,11 +573,12 @@ internal sealed class Overlay : Form
         detailBody.Controls.Add(details);
         detailBody.Controls.Add(recipeUseLinks);
         recipeUseLinks.SizeChanged += (_, _) => FitRecipeUseLinks();
-        detailPanel.Controls.Add(detailBody, 0, 3);
+        detailPanel.Controls.Add(researchLinks, 0, 3);
+        detailPanel.Controls.Add(detailBody, 0, 4);
         calculation.Controls.Add(Caption("목표 수량"));
         calculation.Controls.Add(target);
         calculation.Controls.Add(saveGoal);
-        detailPanel.Controls.Add(calculation, 0, 4);
+        detailPanel.Controls.Add(calculation, 0, 5);
         detailView = detailPanel;
         wishlistView = BuildWishlist();
         side.Controls.Add(detailView);
@@ -812,12 +863,14 @@ internal sealed class Overlay : Form
             searchDelay.Start();
     }
 
-    private void OpenItem(int id, string searchText)
+    private void OpenItem(int id, string searchText) => OpenEntry(Category.Item, id, searchText);
+
+    private void OpenEntry(Category category, int? id, string searchText)
     {
         settingSearch = true;
         try
         {
-            filter.SelectedIndex = 1;
+            filter.SelectedIndex = Array.IndexOf(Filters, category);
             query.Text = searchText;
         }
         finally
@@ -844,7 +897,7 @@ internal sealed class Overlay : Form
             if (selectedId.HasValue)
             {
                 for (int i = 0; i < found.Count; i++)
-                    if (found[i].ItemId == selectedId)
+                    if ((found[i].ItemId ?? found[i].GuideId) == selectedId)
                     {
                         selected = i;
                         break;
@@ -869,6 +922,15 @@ internal sealed class Overlay : Form
             recipeSelector.Items.Clear();
             var selected = results.SelectedItem as Entry;
             int? id = selected?.ItemId;
+            researchLinks.Items.Clear();
+            if (selected is not null)
+                researchLinks.Items.AddRange(catalog.RelatedResearch(selected).Cast<object>().ToArray());
+            researchLinks.Visible = researchLinks.Items.Count > 0;
+            if (researchLinks.Items.Count > 0)
+            {
+                researchLinks.Items.Insert(0, "연구 경로 이동");
+                researchLinks.SelectedIndex = 0;
+            }
             recipeUses = selected is { Category: Category.Item, ItemId: int ingredientId }
                 ? catalog.RecipeUses(ingredientId) : [];
             showingRecipeUses = recipeUses.Count > 0 && selected?.Recipes is not { Length: > 0 };
@@ -900,6 +962,7 @@ internal sealed class Overlay : Form
     {
         if (bindingRecipes)
             return;
+        ShowItemIcon(results.SelectedItem as Entry);
         bool showLinks = showingRecipeUses && recipeUses.Count > 0;
         details.Visible = !showLinks;
         recipeUseLinks.Visible = showLinks;
@@ -909,7 +972,9 @@ internal sealed class Overlay : Form
             calculation.Visible = false;
             title.Text = "검색 결과 없음";
             metadata.Text = "";
-            details.Text = "검색어를 줄이거나 분류를 전체로 바꿔 보세요.";
+            details.Text = Filters[filter.SelectedIndex] == Category.Research && !catalog.HasResearch
+                ? "Steam 제작법을 다시 불러오면 연구 비용과 해금 경로를 검색할 수 있습니다."
+                : "검색어를 줄이거나 분류를 전체로 바꿔 보세요.";
             return;
         }
 
@@ -981,7 +1046,7 @@ internal sealed class Overlay : Form
             });
             if (aliases.Length > 0)
                 document.Aliases(aliases);
-            if (entry.Category == Category.Construction)
+            if (entry.Category is Category.Construction or Category.Research or Category.Effect or Category.Trait or Category.Boss or Category.Skill)
             {
                 foreach (string line in entry.Details.Split('\n'))
                 {
@@ -995,10 +1060,41 @@ internal sealed class Overlay : Form
             else if (entry.Details.Length > 0)
                 document.Body(entry.Details);
         }
+        if (entry.Facts is { Length: > 0 })
+        {
+            document.Heading("아이템 속성");
+            foreach (string line in entry.Facts)
+            {
+                if (line?.Split("  ", 2, StringSplitOptions.None) is [var label, var value])
+                    document.Field(label, value);
+            }
+        }
+        if (entry.Acquisition is { Length: > 0 })
+        {
+            document.Heading("재료 획득처");
+            document.Note("고정 목록과 확률은 자산에 기록된 값입니다. 월드 조건과 실제 지급 여부는 미검증입니다.");
+            foreach (string line in entry.Acquisition)
+                if (line?.Split("  ", 2, StringSplitOptions.None) is [var label, var value])
+                    document.Field(label, value);
+        }
         if (choice is not null)
             document.Note($"제작법 출처  {choice.Source}");
         document.Note($"출처  {entry.Source}");
         RenderDetails(document);
+    }
+
+    private void ShowItemIcon(Entry? entry)
+    {
+        string? path = catalog.RecipeBuild.Length > 0 &&
+            entry is { Category: Category.Item, VerifiedAsset: true, ItemId: int id }
+            ? Path.Combine(ItemIconCache.DirectoryFor(catalog.RecipeBuild), $"{id}.png") : null;
+        if (iconPath == path)
+            return;
+        iconPath = path;
+        var previousIcon = itemIcon.Image;
+        itemIcon.Image = path is null ? null : ItemIconCache.Read(path);
+        itemIcon.Visible = itemIcon.Image is not null;
+        previousIcon?.Dispose();
     }
 
     private void ShowRecipeUseLinks()
@@ -1133,7 +1229,7 @@ internal sealed class Overlay : Form
         }
         if (query.Focused && query.IsComposing)
             return base.ProcessCmdKey(ref msg, keyData);
-        if (keyData == Keys.Escape && !filter.DroppedDown && !recipeSelector.DroppedDown)
+        if (keyData == Keys.Escape && !filter.DroppedDown && !recipeSelector.DroppedDown && !researchLinks.DroppedDown)
         {
             HidePanel();
             return true;
@@ -1198,6 +1294,7 @@ internal sealed class Overlay : Form
         tray.Dispose();
         menu.Dispose();
         hints.Dispose();
+        itemIcon.Image?.Dispose();
         searchDelay.Dispose();
         collectedFont.Dispose();
         base.OnFormClosed(e);

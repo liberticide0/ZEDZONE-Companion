@@ -103,6 +103,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("game", type=Path)
     parser.add_argument("--allow-download", action="store_true")
+    parser.add_argument("--icons", action="store_true")
     parser.add_argument("--package-dir", type=Path)
     args = parser.parse_args()
     converter = Path(__file__).resolve().parent
@@ -115,6 +116,11 @@ def main():
         return MISSING_PACKAGES
     sys.path.append(str(installed))
     script = converter.parent / "probe-recipes.py"
+    if args.icons:
+        probe = runpy.run_path(str(script))
+        icons = runpy.run_path(str(converter / "probe-icons.py"))
+        icons["write_icons"](args.game, probe)
+        return 0
     sys.argv = [str(script), str(args.game), "--snapshot"]
     runpy.run_path(str(script), run_name="__main__")
     return 0

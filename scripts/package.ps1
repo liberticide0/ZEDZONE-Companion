@@ -60,7 +60,7 @@ try {
     if (-not (Test-Path -LiteralPath (Join-Path $python 'LICENSE.txt'))) {
         throw 'CPython redistribution notice is missing.'
     }
-    Copy-Item -LiteralPath scripts/converter-bootstrap.py, scripts/converter-packages.json -Destination $converter
+    Copy-Item -LiteralPath scripts/converter-bootstrap.py, scripts/converter-packages.json, scripts/probe-icons.py -Destination $converter
     Copy-Item -LiteralPath README.md, LICENSE, scripts/probe-recipes.py -Destination $staging
     $zip = Join-Path $artifacts "ZEDZONE-Companion-$version-win-x64.zip"
     $contents = 'ZEDZONE.Companion.exe', 'README.md', 'LICENSE', 'probe-recipes.py', 'dotnet-notices', 'converter' |

@@ -37,6 +37,12 @@ internal sealed class Overlay : Form
     private readonly Label count = Caption("");
     private readonly Label status = Caption("");
     private readonly Label title = Caption("", Ink);
+    private readonly PictureBox itemIcon = new()
+    {
+        Size = new Size(42, 42), SizeMode = PictureBoxSizeMode.Zoom, Margin = new Padding(0, 0, 8, 0),
+        Visible = false
+    };
+    private string? iconPath;
     private readonly Label metadata = Caption("");
     private readonly Button wishlistToggle = ActionButton("찜목록");
     private readonly Button sizeToggle = ActionButton("작게");
@@ -312,6 +318,26 @@ internal sealed class Overlay : Form
             RefreshResults();
             RefreshWishlist();
             preparationStatus = null;
+            if (!Directory.Exists(ItemIconCache.DirectoryFor(recipes.Build)))
+            {
+                preparationStatus = "제작법 준비됨 · 아이콘 준비 중…";
+                UpdateStatus();
+                try
+                {
+                    await RecipePreparation.RunAsync(game, allowDownload: false, preparationLifetime.Token, icons: true);
+                }
+                catch (Exception error) when (Catalog.IsImportError(error) || error is System.ComponentModel.Win32Exception
+                    or TimeoutException or InvalidOperationException)
+                {
+                    // Recipe data has already been loaded, so icons can fail independently.
+                }
+                if (!IsDisposed && !Disposing)
+                {
+                    preparationStatus = null;
+                    iconPath = null;
+                    ShowItemIcon(results.SelectedItem as Entry);
+                }
+            }
         }
         catch (OperationCanceledException) when (preparationLifetime.IsCancellationRequested)
         {
@@ -524,7 +550,13 @@ internal sealed class Overlay : Form
         metadata.ForeColor = Accent;
         metadata.Padding = new Padding(0, 0, 0, 9);
         details.Dock = DockStyle.Fill;
-        detailPanel.Controls.Add(title, 0, 0);
+        var titleRow = new TableLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, ColumnCount = 2, Margin = Padding.Empty };
+        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        titleRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        titleRow.Controls.Add(itemIcon, 0, 0);
+        titleRow.Controls.Add(title, 1, 0);
+        title.TextAlign = ContentAlignment.MiddleLeft;
+        detailPanel.Controls.Add(titleRow, 0, 0);
         detailPanel.Controls.Add(metadata, 0, 1);
         var detailActions = new TableLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, ColumnCount = 2, Margin = Padding.Empty };
         detailActions.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
@@ -924,6 +956,7 @@ internal sealed class Overlay : Form
     {
         if (bindingRecipes)
             return;
+        ShowItemIcon(results.SelectedItem as Entry);
         bool showLinks = showingRecipeUses && recipeUses.Count > 0;
         details.Visible = !showLinks;
         recipeUseLinks.Visible = showLinks;
@@ -1042,6 +1075,20 @@ internal sealed class Overlay : Form
             document.Note($"제작법 출처  {choice.Source}");
         document.Note($"출처  {entry.Source}");
         RenderDetails(document);
+    }
+
+    private void ShowItemIcon(Entry? entry)
+    {
+        string? path = catalog.RecipeBuild.Length > 0 &&
+            entry is { Category: Category.Item, VerifiedAsset: true, ItemId: int id }
+            ? Path.Combine(ItemIconCache.DirectoryFor(catalog.RecipeBuild), $"{id}.png") : null;
+        if (iconPath == path)
+            return;
+        iconPath = path;
+        var previousIcon = itemIcon.Image;
+        itemIcon.Image = path is null ? null : ItemIconCache.Read(path);
+        itemIcon.Visible = itemIcon.Image is not null;
+        previousIcon?.Dispose();
     }
 
     private void ShowRecipeUseLinks()
@@ -1241,6 +1288,7 @@ internal sealed class Overlay : Form
         tray.Dispose();
         menu.Dispose();
         hints.Dispose();
+        itemIcon.Image?.Dispose();
         searchDelay.Dispose();
         collectedFont.Dispose();
         base.OnFormClosed(e);
